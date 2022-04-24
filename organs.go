@@ -66,6 +66,7 @@ type Manager struct {
 
 type Node struct {
 	sync.RWMutex
+	name         string
 	edges        []*Edge
 	serverMux    *http.ServeMux
 	origin       string
@@ -75,6 +76,32 @@ type Node struct {
 	workers      []Worker
 }
 
+func GetNextAddresses() (string, string, string, string) {
+	currentPort++
+	return ORIGIN,
+		fmt.Sprintf(":%v", currentPort),
+		fmt.Sprintf(URL_TEMPLATE, currentPort),
+		fmt.Sprintf(WEBSOCKET_URL_TEMPLATE, currentPort)
+}
+
+func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
+	origin, port, url, websocketUrl := GetNextAddresses()
+	node := &Node{
+		name:         name,
+		origin:       origin,
+		port:         port,
+		websocketUrl: websocketUrl,
+		managers:     make(map[WorkType]*Manager),
+	}
+	graph.allNodes[url] = node
+	node.Start(ctx)
+	return node
+}
+
+func (n *Node) String() string {
+	return fmt.Sprintf("%v%v (%T)", n.name, n.port, n)
+}
+
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
 	n.serverMux.Handle("/work", websocket.Handler(n.ProcessIncomingWorkRequests))
@@ -82,22 +109,27 @@ func (n *Node) Start(ctx context.Context) {
 	go func() {
 		err := http.ListenAndServe(n.port, n.serverMux)
 		if err != nil {
-			log.Fatal("ListenAndServe: " + err.Error())
+			log.Fatal(fmt.Sprintf("%v ListenAndServe: ", n), err.Error())
 		}
 	}()
 }
 
 func (n *Node) Connect(ctx context.Context, origin, websocketUrl string) {
-	ws, err := websocket.Dial(websocketUrl, "", origin)
+	connection, err := websocket.Dial(websocketUrl, "", origin)
 	if err != nil {
-		log.Fatal("Connect: ", err)
+		log.Fatal(fmt.Sprintf("%v Connect: ", n), err)
 	}
 	n.Lock()
 	defer n.Unlock()
 	n.edges = append(n.edges, &Edge{
-		connection: ws,
+		connection: connection,
 	})
-	go n.ProcessIncomingWorkResponses(ctx, ws)
+	go n.ProcessIncomingWorkResponses(ctx, connection)
+}
+
+func ConnectNodes(ctx context.Context, node1, node2 *Node) {
+	node1.Connect(ctx, node2.origin, node2.websocketUrl)
+	node2.Connect(ctx, node1.origin, node1.websocketUrl)
 }
 
 func (n *Node) MakeAvailable(worker Worker) {
@@ -140,9 +172,8 @@ func (n *Node) RemoveWorker(worker Worker) {
 func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 	defer connection.Close()
 	for {
-		fmt.Println("ProcessIncomingWorkRequests")
 		work := Receive(connection)
-		fmt.Printf("Received Request: %v\n", work)
+		fmt.Printf("%v Received Request: %v\n", n, work)
 		manager, ok := n.managers[work.workType]
 		if ok {
 			if work.status == 0 {
@@ -151,7 +182,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 				select {
 				case w := <-manager.nextAvailableWorker:
 					finishedWork := w.Work(ctx, work)
-					fmt.Printf("Finished work: %v\n", finishedWork)
+					fmt.Printf("%v Finished work: %v\n", n, finishedWork)
 					Send(connection, finishedWork)
 				case <-ctx.Done():
 				}
@@ -161,15 +192,24 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 				log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
 			}
 		} else {
-			fmt.Printf("Unable to fulfill request: %v\n", work)
+			fmt.Printf("%v Unable to fulfill request: %v\n", n, work)
 		}
 	}
 }
 
 func (n *Node) RequestWork(request Work) (result Work) {
+	fmt.Printf("%v RequestWork: %v\n", n, request)
 	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT_SEC)
 	defer cancel()
 	// First try to get a result without sending:
+	manager, ok := n.managers[request.workType]
+	if !ok {
+		manager = &Manager{
+			nextAvailableWorker: make(chan Worker),
+			resultChan:          make(chan Work, RESULT_BUFFER_SIZE),
+		}
+		n.managers[request.workType] = manager
+	}
 	select {
 	case <-ctx.Done():
 		result = Work{
@@ -177,8 +217,8 @@ func (n *Node) RequestWork(request Work) (result Work) {
 			result:   "Timeout",
 			status:   503,
 		}
-	case result = <-n.managers[request.workType].resultChan:
-		fmt.Printf("Received Result: %v\n", result)
+	case result = <-manager.resultChan:
+		fmt.Printf("%v Received Result: %v\n", n, result)
 	default:
 		for _, edge := range n.edges {
 			Send(edge.connection, request)
@@ -193,8 +233,8 @@ func (n *Node) RequestWork(request Work) (result Work) {
 				result:   "Timeout",
 				status:   503,
 			}
-		case result = <-n.managers[request.workType].resultChan:
-			fmt.Printf("Received Result: %v\n", result)
+		case result = <-manager.resultChan:
+			fmt.Printf("%v Received Result: %v\n", n, result)
 		}
 	}
 	return
@@ -206,9 +246,8 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *web
 		case <-ctx.Done():
 			return
 		default:
-			fmt.Println("ProcessIncomingWorkResponses")
 			work := Receive(connection)
-			fmt.Printf("Received Response: %v\n", work)
+			fmt.Printf("%v Received Response: %v\n", n, work)
 			manager, ok := n.managers[work.workType]
 			if ok {
 				if work.status == 0 {
