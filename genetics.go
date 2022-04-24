@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"log"
 	mRand "math/rand"
 )
 
@@ -27,7 +28,7 @@ func makeDNA(dnaType DNAType, name string) *DNA {
 	// Caution: slow!
 	privateKey, err := ecdsa.GenerateKey(dnaType, rand.Reader)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	return &DNA{
 		name:             name,
@@ -45,7 +46,7 @@ func (d *DNA) GenerateAntigen() Antigen {
 	hash := sha256.Sum256([]byte{byte(d.antigenSignature)})
 	sig, err := ecdsa.SignASN1(rand.Reader, d.base, hash[:])
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	return sig
 }

@@ -7,6 +7,16 @@ type Cell struct {
 	dna      *DNA
 	mhc_i    MHC_I
 	antigen  Antigen
+	workType WorkType
+	parent   *Node
+}
+
+func (c *Cell) SetParent(node *Node) {
+	c.parent = node
+}
+
+func (c *Cell) GetWorkType() WorkType {
+	return c.workType
 }
 
 func (c *Cell) String() string {
