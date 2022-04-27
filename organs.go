@@ -35,7 +35,6 @@ type Edge struct {
 }
 
 func Send(connection *websocket.Conn, request Work) {
-	fmt.Printf("Send: %v\n", request)
 	err := websocket.JSON.Send(connection, WorkSocketData{
 		WorkType: int(request.workType),
 		Result:   request.result,
@@ -55,7 +54,6 @@ func Receive(connection *websocket.Conn) (request Work) {
 	request.workType = WorkType(data.WorkType)
 	request.status = data.Status
 	request.result = data.Result
-	fmt.Printf("Receive: %v\n", request)
 	return
 }
 
@@ -73,8 +71,9 @@ type Node struct {
 	port         string
 	websocketUrl string
 	managers     map[WorkType]*Manager
-	workers      []Worker
 }
+
+var currentPort = 8000
 
 func GetNextAddresses() (string, string, string, string) {
 	currentPort++
@@ -144,7 +143,6 @@ func (n *Node) MakeAvailable(worker Worker) {
 func (n *Node) AddWorker(worker Worker) {
 	n.Lock()
 	defer n.Unlock()
-	n.workers = append(n.workers, worker)
 	_, ok := n.managers[worker.GetWorkType()]
 	if !ok {
 		manager := &Manager{
@@ -159,13 +157,6 @@ func (n *Node) AddWorker(worker Worker) {
 func (n *Node) RemoveWorker(worker Worker) {
 	n.Lock()
 	defer n.Unlock()
-	var workers []Worker
-	for _, c := range n.workers {
-		if c != worker {
-			workers = append(workers, c)
-		}
-	}
-	n.workers = workers
 	worker.SetParent(nil)
 }
 
@@ -173,7 +164,6 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 	defer connection.Close()
 	for {
 		work := Receive(connection)
-		fmt.Printf("%v Received Request: %v\n", n, work)
 		manager, ok := n.managers[work.workType]
 		if ok {
 			if work.status == 0 {
@@ -192,13 +182,12 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 				log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
 			}
 		} else {
-			fmt.Printf("%v Unable to fulfill request: %v\n", n, work)
+			// fmt.Printf("%v Unable to fulfill request: %v\n", n, work)
 		}
 	}
 }
 
 func (n *Node) RequestWork(request Work) (result Work) {
-	fmt.Printf("%v RequestWork: %v\n", n, request)
 	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT_SEC)
 	defer cancel()
 	// First try to get a result without sending:

@@ -17,16 +17,18 @@ immune system uses to determine whether a cell is indeed you. MHC Class I
 proteins are globally shared and are unique to each body. Since each cell shares
 the same DNA, the code to generate the unique MHC Class I is shared. An immune
 cell then checks whether the cell's MHC Class I is a perfect fit for the MHC
-Class I protein presented on its own cell surface. This forms a defacto
-authentication system in the body. 
+Class I protein presented on its own cell surface.
 
-In digital authentication, symmetric cryptography operates on prime
-numbers: multiplying two large prime numbers produces an even larger number 
-for which it is infeasible to derive the two primes that produced it. Since
-the numbers are prime, no other divisors exist to cleanly divide into those
-numbers. It's possible to build a simple genetic system using prime numbers,
-but there's an even more interesting cryptography system that is better suited
-for this type of authentication:
+The MCH Class I proteins act as a window into the cell. Cells present a random
+sample of the proteins that are in production inside the cell. In order to catch
+virus infected cells, immune cells then check that the proteins being presented
+on the surface are 1) proteins that it should be producing, and 2) don't belong
+to a foreign pathogen.
+
+These two systems in combination form a defacto authentication system for the
+cell: 1) identity, and 2) correctness. This is equivalent to a
+crpytographically-secure checksum!
+
 **Elliptical Curve Digital Signature Algorithm (ECDSA)**.
 
 ECDSA works by generating a private and public key from a set of shared
@@ -34,17 +36,18 @@ parameters which define an elliptical curve and sign some data which we can
 verify with the public key.
 
 Generating a private/public key takes time, but once a pair is generated,
-we can store the private key as the "DNA" and the public key as the "MHC Class I."
-Then, we use the private key to sign some data common to all cells, some form of
-human readable ID. This signed piece of data is the antigen.
+we can store the private key as the "DNA" and the public key as the
+"MHC Class I." Then, we use the private key to a set of proteins within the
+cell. This signed piece of data is the antigen.
 
 To determine whether a given cell has the correct MHC Class I, the immune cell 
-attempts to verify the signed data (antigen) with the public key
+attempts to verify the signed data (proteins) with the public key
 (MHC Class I). If the verification is successful, the cell's public key
 (MHC Class I) must have come from the same private key (DNA). If not, it is
 rejected and promptly dealt with. Another case is that a virus has infected the
-cell causing it to present a different antigen (performed by mutating the
-data before signing). This indicates that the cell is infected.
+cell causing it to present a different proteins (performed by mutating the
+data before signing). The checksum will pass, given that they share the same
+private/public key, so a separate system is needed to check proteins.
 
 **Why not just check whether the public keys match?**
 It's less interesting and we want to make sure that the process of checking
@@ -63,9 +66,8 @@ The [`crypto.ecdsa` package](https://pkg.go.dev/crypto/ecdsa) has everything we
 need to implement this!
 
 The package has a `GenerateKey()` method which will be used to generate the
-DNA, and also comes with a public key (MHC Class I). We'll store a unique
-identifier with each type of DNA, then generate the antigen with this
-identifier.
+DNA, and also comes with a public key (MHC Class I). We use the `VerifyANSI()`
+method to determine whether the given antigen is correctly signed.
 
 ### Adaptive Immune System
 
@@ -76,9 +78,9 @@ precompute all the known hashes then lookup the hash solution later.
 Here's a very quick summary:
 
 1. Foreign pathogen is detected. Macrophages break it apart and dendritic cells
-   collect the genetic material (antigens) on its little arms.
+   collect the protein material (antigens) on its little arms.
 1. Dendritic cell travels around to each lymph node to find an Infant T Cell
-   which has a receptor that matches the exact antigen.
+   which has a protein receptor that matches the antigen protein.
 1. When one is found, it will be activated, causing it to reproduce rapidly into
    Helper or Killer T Cells, depending on whether it was carrying:
    1. *MHC Class I protein*: it's an infected cell by virus, so we need Killer T 
@@ -98,11 +100,12 @@ activation!
 So how do we represent that in our simulation? Technically, it would be
 impossible to generate the 10<sup>~16</sup> possible hash values, so instead, we
 use a `uint16` ID number to represent the antigen phenotype, with a total of
-65,535 combinations of unique antigens. Then, at initialization time, we
-generate all 65,535 T cells that can be found in the body. This number is large
-enough that it would be non-trivial to track down, but small enough that it
-won't eat up all the RAM. This is the "data" that we sign with the public key
-to produce the antigen.
+65,535 combinations of unique proteins. Then, at initialization time, we
+generate all 65,535 T cells that can be found in the body and set aside a
+some to represent self proteins. This number is large enough that it
+would be non-trivial to track down, but small enough that it won't eat up all
+the RAM. This is the "data" that we sign with the public key to produce the
+antigen.
 
 Thus, each T cell is given an ID corresponding to a `uint16`. So when an antigen
 is found by the dendritic cell, we'll reach into the associated DNA to pull out
@@ -176,3 +179,29 @@ for that ID subscribe and process it when ready.
 
 Infected cells may skip processing altogether, where compromised or sick cells
 may be delayed in processing requests or take longer to finish.
+
+### Cellular Behavior
+
+So we have cells, which are workers that process requests, and organs, which 
+are servers that process actions requested by cells. How do we define what 
+cells do? When to divide? When to die? And how their behavior changes if they 
+become infected by a virus? We'll use the DNA to also define the behavior of
+the cell, which lends itself well to being hijacked.
+
+Each DNA type comes with a baseline behavior represented by a state diagram: the
+state represents the current action to be taken by the cell, and the state
+transitions based on internal and external conditions on the cell.
+
+For example, for a eukaryotic cell, the initial state is a stem cell. After 
+performing mitosis, it becomes a specialized cell, which then begins to function
+as that type of cell, which can be represented by a request and response loop:
+request some work to perform by another cell, process the result of the work,
+then make itself available to perform work itself. This oscillation can continue
+until a new condition is met that requires the cell to divide, which after
+completion, transitions back to the working state. Finally, after a while, the
+cell can die according to its type and internal state.
+
+Cells present their current state by taking a random sample of the proteins
+within them and presenting them on the cell surface. These proteins represent
+the internal state of the cell. Therefore, we can associate each action with
+a set of proteins 

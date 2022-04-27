@@ -5,24 +5,24 @@ import (
 )
 
 func TestDendriticCellFindTCells(t *testing.T) {
-	bacteriaDNA := makeDNA(BACTERIA_DNA, "E. Coli")
-	virusRNA := makeDNA(VIRUS_RNA, "COVID-19")
-	human2DNA := makeDNA(HUMAN_DNA, "Human 2")
-	humanDNA := makeDNA(HUMAN_DNA, "Human 1")
+	bacteriaDNA := MakeDNA(BACTERIA_DNA, "E. Coli")
+	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
+	human2DNA := MakeDNA(HUMAN_DNA, "Human 2")
+	humanDNA := MakeDNA(HUMAN_DNA, "Human 1")
 
-	dendriticCell := makeDendriticCell(humanDNA)
+	dendriticCell := MakeDendriticCell(humanDNA)
 
-	dendriticCell.Collect(makeBacteria(bacteriaDNA))
-	dendriticCell.Collect(makeVirus(virusRNA))
-	dendriticCell.Collect(makeHumanCell(human2DNA))
+	dendriticCell.Collect(MakeProkaryoticCell(bacteriaDNA, Bacterial))
+	dendriticCell.Collect(MakeVirus(virusRNA, Viral))
+	dendriticCell.Collect(MakeEukaryoticStemCell(human2DNA, Pneumocyte, 0))
 
-	tCells := generateTCells(humanDNA)
+	tCells := GenerateTCells(humanDNA)
 
 	for _, t := range tCells {
 		dendriticCell.FoundMatch(t)
 	}
 
-	for signature, found := range dendriticCell.antigenSignatures {
+	for signature, found := range dendriticCell.proteinSignatures {
 		if !found {
 			t.Errorf("Did not find %v", signature)
 		}

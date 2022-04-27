@@ -5,18 +5,18 @@ import (
 )
 
 func TestCellVerification(t *testing.T) {
-	bacteriaDNA := makeDNA(BACTERIA_DNA, "E. Coli")
-	bacteria := makeBacteria(bacteriaDNA)
+	bacteriaDNA := MakeDNA(BACTERIA_DNA, "E. Coli")
+	bacteria := MakeProkaryoticCell(bacteriaDNA, Bacterial)
 
-	virusRNA := makeDNA(VIRUS_RNA, "COVID-19")
-	virus := makeVirus(virusRNA)
+	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
+	virus := MakeVirus(virusRNA, Viral)
 
-	humanDNA := makeDNA(HUMAN_DNA, "Human 1")
-	humanCell := makeHumanCell(humanDNA)
-	tCell := makeTCell(humanDNA, 0)
+	humanDNA := MakeDNA(HUMAN_DNA, "Human 1")
+	humanCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+	tCell := MakeTCell(humanDNA, 0)
 
-	human2DNA := makeDNA(HUMAN_DNA, "Human 2")
-	human2Cell := makeHumanCell(human2DNA)
+	human2DNA := MakeDNA(HUMAN_DNA, "Human 2")
+	human2Cell := MakeEukaryoticStemCell(human2DNA, Pneumocyte, 0)
 
 	cases := []struct {
 		name      string

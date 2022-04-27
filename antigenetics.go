@@ -8,7 +8,10 @@ import (
 
 func main() {
 
-	GenerateBody(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	GenerateBody(ctx)
 
 	// Setting up signal capturing
 	stop := make(chan os.Signal, 1)

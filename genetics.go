@@ -5,8 +5,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"log"
-	mRand "math/rand"
 )
 
 var HUMAN_DNA = elliptic.P521()
@@ -15,43 +15,81 @@ var VIRUS_RNA = elliptic.P224()
 
 type DNAType elliptic.Curve
 type DNA struct {
-	name             string
-	base             *ecdsa.PrivateKey
-	dnaType          DNAType
-	antigenSignature AntigenSignature
+	name         string
+	base         *ecdsa.PrivateKey
+	dnaType      DNAType
+	makeFunction func(c *EukaryoticCell) *StateDiagram
 }
 type MHC_I *ecdsa.PublicKey
-type AntigenSignature uint16
-type Antigen []byte
+type Protein uint16
+type AntigenSignature []byte
 
-func makeDNA(dnaType DNAType, name string) *DNA {
+type Antigen struct {
+	proteins  []Protein
+	signature AntigenSignature
+}
+
+func MakeDNA(dnaType DNAType, name string) *DNA {
 	// Caution: slow!
 	privateKey, err := ecdsa.GenerateKey(dnaType, rand.Reader)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return &DNA{
-		name:             name,
-		base:             privateKey,
-		dnaType:          dnaType,
-		antigenSignature: AntigenSignature(mRand.Uint32()),
+	dna := &DNA{
+		name:    name,
+		base:    privateKey,
+		dnaType: dnaType,
 	}
+	switch dnaType {
+	case HUMAN_DNA:
+		dna.makeFunction = MakeStateDiagramByCell
+	}
+	return dna
 }
 
 func (d *DNA) MHC_I() MHC_I {
 	return &d.base.PublicKey
 }
 
-func (d *DNA) GenerateAntigen() Antigen {
-	hash := sha256.Sum256([]byte{byte(d.antigenSignature)})
-	sig, err := ecdsa.SignASN1(rand.Reader, d.base, hash[:])
+func HashProteins(proteins []Protein) [32]byte {
+	b := make([]byte, 2*len(proteins))
+
+	for i, protein := range proteins {
+		binary.LittleEndian.PutUint16(b[i*2:], uint16(protein))
+	}
+
+	return sha256.Sum256(b)
+}
+
+func (d *DNA) GenerateSelfProteins() map[Protein]bool {
+	hash := d.GenerateAntigen([]Protein{42}).signature
+	var proteins []Protein
+
+	for i := 0; i < len(hash)/2; i++ {
+		protein := Protein(binary.LittleEndian.Uint16(hash[i*2:]))
+		proteins = append(proteins, protein)
+	}
+
+	selfProteins := make(map[Protein]bool)
+	for _, protein := range proteins {
+		selfProteins[protein] = true
+	}
+	return selfProteins
+}
+
+func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
+	hash := HashProteins(proteins)
+	signature, err := ecdsa.SignASN1(rand.Reader, d.base, hash[:])
 	if err != nil {
 		log.Fatal(err)
 	}
-	return sig
+	return &Antigen{
+		proteins:  proteins,
+		signature: signature,
+	}
 }
 
-func (d *DNA) Verify(a *ecdsa.PublicKey, m Antigen) bool {
-	hash := sha256.Sum256([]byte{byte(d.antigenSignature)})
-	return ecdsa.VerifyASN1(a, hash[:], m)
+func (d *DNA) Verify(a *ecdsa.PublicKey, m *Antigen) bool {
+	hash := HashProteins(m.proteins)
+	return ecdsa.VerifyASN1(a, hash[:], m.signature)
 }

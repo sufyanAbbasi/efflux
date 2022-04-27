@@ -4,7 +4,24 @@ import (
 	"context"
 )
 
-var currentPort = 8000
+type EdgeType int // Determines how Nodes are connected.
+
+const (
+	cellular    EdgeType = iota // Cell to cell connection
+	bloodVessel                 // Connected via blood vessels
+	lymphVessel                 // Connected via lymph vessels
+	neurons                     // Connected via neurons.
+)
+
+const (
+	doNothing WorkType = iota
+	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
+	inhale             // Called on lung cells by blood cells.
+	exhale             // Called on blood cells by other cells.
+	pump               // Called on to heart cells to pump, by brain cels.
+	move               // Called on muscle cells by brain cells.
+	think              // Called on brain cells to perform a computation, by muscle cells.
+)
 
 type Graph struct {
 	allNodes map[string]*Node
@@ -12,6 +29,7 @@ type Graph struct {
 
 type Body struct {
 	*Graph
+	dna         *DNA
 	bloodNodes  []*Node
 	boneNodes   []*Node
 	brainNodes  []*Node
@@ -22,11 +40,58 @@ type Body struct {
 	skinNodes   []*Node
 }
 
+func (b *Body) GenerateCellsAndStart(ctx context.Context) {
+	nodeTypes := [][]*Node{
+		b.bloodNodes,
+		b.brainNodes,
+		b.heartNodes,
+		b.lungNodes,
+		b.muscleNodes,
+		b.skinNodes,
+	}
+	cellTypes := []CellType{
+		RedBlood,
+		Neuron,
+		Cardiomyocyte,
+		Pneumocyte,
+		Myocyte,
+		Keratinocyte,
+	}
+
+	workTypes := []WorkType{
+		inhale,
+		think,
+		pump,
+		exhale,
+		move,
+		cover,
+	}
+
+	counts := []int{
+		50, // Blood: ideally enough to meet oxygen demand.
+		4,  // Brain: 4 lobes
+		2,  // Heart: 2 ventricles
+		50, // Lungs: enough to match demand from blood
+		10, // Muscles: large, demanding oxygen draw
+		30, // Skin: N*number of muscle cells
+	}
+	for i, nodes := range nodeTypes {
+		for _, node := range nodes {
+			for j := 0; j < counts[i]; j++ {
+				cell := MakeEukaryoticStemCell(b.dna, cellTypes[i], workTypes[i])
+				cell.parent = node
+				go cell.Start(ctx)
+			}
+		}
+	}
+}
+
 func GenerateBody(ctx context.Context) *Body {
 	b := &Body{
 		Graph: &Graph{
 			allNodes: make(map[string]*Node),
 		},
+		dna: MakeDNA(HUMAN_DNA, HUMAN_NAME),
 	}
 	// Organs
 	brain := InitializeNewNode(ctx, b.Graph, "brain")
@@ -34,6 +99,7 @@ func GenerateBody(ctx context.Context) *Body {
 
 	heart := InitializeNewNode(ctx, b.Graph, "heart")
 	b.heartNodes = append(b.heartNodes, heart)
+	ConnectNodes(ctx, heart, brain)
 
 	lungLeft := InitializeNewNode(ctx, b.Graph, "lungLeft")
 	b.lungNodes = append(b.lungNodes, lungLeft)
@@ -47,21 +113,25 @@ func GenerateBody(ctx context.Context) *Body {
 	muscleLeftArm := InitializeNewNode(ctx, b.Graph, "muscleLeftArm")
 	skinLeftArm := InitializeNewNode(ctx, b.Graph, "skinLeftArm")
 	ConnectNodes(ctx, muscleLeftArm, skinLeftArm)
+	ConnectNodes(ctx, muscleLeftArm, brain)
 
 	// Right Arm
 	muscleRightArm := InitializeNewNode(ctx, b.Graph, "muscleRightArm")
 	skinRightArm := InitializeNewNode(ctx, b.Graph, "skinRightArm")
 	ConnectNodes(ctx, muscleRightArm, skinRightArm)
+	ConnectNodes(ctx, muscleRightArm, brain)
 
 	// Left Leg
 	muscleLeftLeg := InitializeNewNode(ctx, b.Graph, "muscleLeftLeg")
 	skinLeftLeg := InitializeNewNode(ctx, b.Graph, "skinLeftLeg")
 	ConnectNodes(ctx, muscleLeftLeg, skinLeftLeg)
+	ConnectNodes(ctx, muscleLeftLeg, brain)
 
 	// Right Leg
 	muscleRightLeg := InitializeNewNode(ctx, b.Graph, "muscleRightLeg")
 	skinRightLeg := InitializeNewNode(ctx, b.Graph, "skinRightLeg")
 	ConnectNodes(ctx, muscleRightLeg, skinRightLeg)
+	ConnectNodes(ctx, muscleRightLeg, brain)
 
 	b.muscleNodes = append(b.muscleNodes,
 		muscleLeftArm,
@@ -162,5 +232,6 @@ func GenerateBody(ctx context.Context) *Body {
 		boneRightLeg,
 	)
 
+	b.GenerateCellsAndStart(ctx)
 	return b
 }
