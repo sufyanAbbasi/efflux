@@ -14,13 +14,13 @@ const (
 )
 
 const (
-	doNothing WorkType = iota
-	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	inhale             // Called on lung cells by blood cells.
-	exhale             // Called on blood cells by other cells.
-	pump               // Called on to heart cells to pump, by brain cels.
-	move               // Called on muscle cells by brain cells.
-	think              // Called on brain cells to perform a computation, by muscle cells.
+	status WorkType = iota
+	cover           // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
+	inhale          // Called on lung cells by blood cells.
+	exhale          // Called on blood cells by other cells.
+	pump            // Called on to heart cells to pump, by brain cels.
+	move            // Called on muscle cells by brain cells.
+	think           // Called on brain cells to perform a computation, by muscle cells.
 )
 
 type Graph struct {
@@ -68,12 +68,12 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	counts := []int{
-		50, // Blood: ideally enough to meet oxygen demand.
-		4,  // Brain: 4 lobes
-		2,  // Heart: 2 ventricles
-		50, // Lungs: enough to match demand from blood
-		10, // Muscles: large, demanding oxygen draw
-		30, // Skin: N*number of muscle cells
+		10, //50, // Blood: ideally enough to meet oxygen demand.
+		1,  //4,  // Brain: 4 lobes
+		1,  //2,  // Heart: 2 ventricles
+		5,  //50, // Lungs: enough to match demand from blood
+		1,  //10, // Muscles: large, demanding oxygen draw
+		1,  //30, // Skin: N*number of muscle cells
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {

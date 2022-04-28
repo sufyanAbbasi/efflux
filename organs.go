@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -30,11 +32,16 @@ type WorkSocketData struct {
 	Status   int
 }
 
+type StatusSocketData struct {
+	Status      int
+	Connections []string
+}
+
 type Edge struct {
 	connection *websocket.Conn
 }
 
-func Send(connection *websocket.Conn, request Work) {
+func SendWork(connection *websocket.Conn, request Work) {
 	err := websocket.JSON.Send(connection, WorkSocketData{
 		WorkType: int(request.workType),
 		Result:   request.result,
@@ -45,7 +52,11 @@ func Send(connection *websocket.Conn, request Work) {
 	}
 }
 
-func Receive(connection *websocket.Conn) (request Work) {
+func SendStatus(connection *websocket.Conn, status StatusSocketData) error {
+	return websocket.JSON.Send(connection, status)
+}
+
+func ReceiveWork(connection *websocket.Conn) (request Work) {
 	data := &WorkSocketData{}
 	err := websocket.JSON.Receive(connection, &data)
 	if err != nil {
@@ -73,7 +84,7 @@ type Node struct {
 	managers     map[WorkType]*Manager
 }
 
-var currentPort = 8000
+var currentPort = 7999
 
 func GetNextAddresses() (string, string, string, string) {
 	currentPort++
@@ -104,6 +115,7 @@ func (n *Node) String() string {
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
 	n.serverMux.Handle("/work", websocket.Handler(n.ProcessIncomingWorkRequests))
+	n.serverMux.Handle("/status", websocket.Handler(n.GetNodeStatus))
 
 	go func() {
 		err := http.ListenAndServe(n.port, n.serverMux)
@@ -163,7 +175,7 @@ func (n *Node) RemoveWorker(worker Worker) {
 func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 	defer connection.Close()
 	for {
-		work := Receive(connection)
+		work := ReceiveWork(connection)
 		manager, ok := n.managers[work.workType]
 		if ok {
 			if work.status == 0 {
@@ -172,8 +184,8 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 				select {
 				case w := <-manager.nextAvailableWorker:
 					finishedWork := w.Work(ctx, work)
-					fmt.Printf("%v Finished work: %v\n", n, finishedWork)
-					Send(connection, finishedWork)
+					// fmt.Printf("%v Finished work: %v\n", n, finishedWork)
+					SendWork(connection, finishedWork)
 				case <-ctx.Done():
 				}
 				cancel()
@@ -183,6 +195,26 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 			}
 		} else {
 			// fmt.Printf("%v Unable to fulfill request: %v\n", n, work)
+		}
+	}
+}
+
+func (n *Node) GetNodeStatus(connection *websocket.Conn) {
+	defer connection.Close()
+	ticker := time.NewTicker(10 * time.Second)
+	for {
+		<-ticker.C
+		var connections []string
+		for _, edge := range n.edges {
+			address := strings.Replace(edge.connection.RemoteAddr().String(), "/work", "/status", 1)
+			connections = append(connections, address)
+		}
+		err := SendStatus(connection, StatusSocketData{
+			Status:      200,
+			Connections: connections,
+		})
+		if err != nil {
+			return
 		}
 	}
 }
@@ -207,10 +239,10 @@ func (n *Node) RequestWork(request Work) (result Work) {
 			status:   503,
 		}
 	case result = <-manager.resultChan:
-		fmt.Printf("%v Received Result: %v\n", n, result)
+		// fmt.Printf("%v Received Result: %v\n", n, result)
 	default:
 		for _, edge := range n.edges {
-			Send(edge.connection, request)
+			SendWork(edge.connection, request)
 		}
 	}
 	if result.status == 0 {
@@ -223,7 +255,7 @@ func (n *Node) RequestWork(request Work) (result Work) {
 				status:   503,
 			}
 		case result = <-manager.resultChan:
-			fmt.Printf("%v Received Result: %v\n", n, result)
+			// fmt.Printf("%v Received Result: %v\n", n, result)
 		}
 	}
 	return
@@ -235,8 +267,8 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *web
 		case <-ctx.Done():
 			return
 		default:
-			work := Receive(connection)
-			fmt.Printf("%v Received Response: %v\n", n, work)
+			work := ReceiveWork(connection)
+			// fmt.Printf("%v Received Response: %v\n", n, work)
 			manager, ok := n.managers[work.workType]
 			if ok {
 				if work.status == 0 {
