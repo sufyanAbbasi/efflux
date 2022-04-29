@@ -14,6 +14,26 @@ import (
 
 type WorkType int
 
+func (w WorkType) String() string {
+	switch w {
+	case status:
+		return "status"
+	case cover:
+		return "cover"
+	case inhale:
+		return "inhale"
+	case exhale:
+		return "exhale"
+	case pump:
+		return "pump"
+	case move:
+		return "move"
+	case think:
+		return "think"
+	}
+	return "unknown"
+}
+
 type Worker interface {
 	GetWorkType() WorkType
 	SetParent(parent *Node)
@@ -33,8 +53,15 @@ type WorkSocketData struct {
 }
 
 type StatusSocketData struct {
-	Status      int
-	Connections []string
+	Status      int              `json:"status"`
+	Connections []string         `json:"connections"`
+	WorkStatus  []WorkStatusData `json:"workStatus"`
+}
+
+type WorkStatusData struct {
+	WorkType       string `json:"workType"`
+	RequestCount   int    `json:"requestCount"`
+	CompletedCount int    `json:"completedCount"`
 }
 
 type Edge struct {
@@ -69,8 +96,11 @@ func ReceiveWork(connection *websocket.Conn) (request Work) {
 }
 
 type Manager struct {
+	sync.RWMutex
 	nextAvailableWorker chan Worker
 	resultChan          chan Work
+	requestCount        int
+	completedCount      int
 }
 
 type Node struct {
@@ -186,6 +216,9 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 					finishedWork := w.Work(ctx, work)
 					// fmt.Printf("%v Finished work: %v\n", n, finishedWork)
 					SendWork(connection, finishedWork)
+					manager.Lock()
+					manager.completedCount++
+					manager.Unlock()
 				case <-ctx.Done():
 				}
 				cancel()
@@ -201,7 +234,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 
 func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 	defer connection.Close()
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	for {
 		<-ticker.C
 		var connections []string
@@ -209,9 +242,22 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 			address := strings.Replace(edge.connection.RemoteAddr().String(), "/work", "/status", 1)
 			connections = append(connections, address)
 		}
+		var workStatus []WorkStatusData
+		for workType, manager := range n.managers {
+			manager.Lock()
+			workStatus = append(workStatus, WorkStatusData{
+				WorkType:       workType.String(),
+				RequestCount:   manager.requestCount,
+				CompletedCount: manager.completedCount,
+			})
+			manager.requestCount = 0
+			manager.completedCount = 0
+			manager.Unlock()
+		}
 		err := SendStatus(connection, StatusSocketData{
 			Status:      200,
 			Connections: connections,
+			WorkStatus:  workStatus,
 		})
 		if err != nil {
 			return
@@ -258,6 +304,9 @@ func (n *Node) RequestWork(request Work) (result Work) {
 			// fmt.Printf("%v Received Result: %v\n", n, result)
 		}
 	}
+	manager.Lock()
+	manager.requestCount++
+	manager.Unlock()
 	return
 }
 

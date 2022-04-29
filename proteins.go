@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 type StateDiagram struct {
@@ -13,13 +14,14 @@ type StateDiagram struct {
 func (s *StateDiagram) Run(ctx context.Context, cell *EukaryoticCell) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
 	if s.root != nil {
 		s.current = s.root
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			default:
+			case <-ticker.C:
 				if s.current != nil {
 					if checkParentOrDie(ctx, cell) && s.current.function != nil {
 						if !s.current.function.Run(ctx, cell) {

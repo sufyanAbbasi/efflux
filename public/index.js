@@ -1,22 +1,71 @@
 const NodeMap = new Map();
 
+const cy = cytoscape({
+
+    container: document.querySelector('.graph'), // container to render in
+  
+    elements: [],
+  
+    style: [ // the stylesheet for the graph
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'shape': 'rectangle',
+          'background-color': 'white',
+          'border-width': '2px',
+          'border-color': '#666',
+          'width': '330px',
+          'height': '100px',
+          'text-wrap': 'wrap',
+          'text-justification': 'left',
+          'font-family': 'monospace',
+          'text-valign': 'center',
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 3,
+          'line-color': '#ccc',
+          'target-arrow-color': '#ccc',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+        }
+      },
+    ],
+
+    autoungrabify: true,
+  
+  });
+
+const layout = {
+    name: 'breadthfirst',
+    grid: true,
+    avoidOverlap: true,
+    avoidOverlapPadding: 10,
+};
+
 class Node {
     constructor(address) {
         this.address = address;
+        this.id = address.replace( /\D/g, '');
+        this.label = `Initializing Node ${this.id}...`;
         this.status = null;
         this.socket = null;
         this.edges = new WeakSet();
+        this.renderCyNode();
         this.setupConnection(address);
     }
 
     processSocket(socket) {
-        console.log("Connected:", this.address);
+        console.log('Connected:', this.address);
         this.socket = socket;
         socket.onmessage = (event) => {
             this.getStatus(event);
         }
         socket.onclose = () => {
-            console.log("Closed:", this.address);
+            console.log('Closed:', this.address);
         };
     }
 
@@ -29,14 +78,37 @@ class Node {
         }
         this.status = data;
 
-        if (this.status.Connections) {
-            for (const address of this.status.Connections) {
+        if (this.status.connections) {
+            for (const address of this.status.connections) {
                 if (!NodeMap.has(address)) {
                     NodeMap.set(address, new Node(address));
                 }
-                this.edges.add(NodeMap.get(address));
+                const node = NodeMap.get(address)
+                if (!this.edges.has(node)) {
+                    this.edges.add(node);
+                    this.renderCyEdge(node);
+                }
             }
         }
+        this.updateLabel(this.status.workStatus);
+    }
+
+    updateLabel(workStatuses) {
+        const labels = [`Node ID: ${this.id}`.padStart(20).padEnd(40)];
+
+        if (!workStatuses) {
+            labels.push('(no work status)'.padStart(10).padEnd(20))
+        } else {
+            const makePadding = (str) => String(str).padStart(5).padEnd(10);
+            labels.push(`${makePadding('Work')}|${makePadding('Requested')}|${makePadding('Completed')}`);
+            labels.push(`--------------------------------`);
+            for (const {workType, requestCount, completedCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
+                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(completedCount)}`);
+            }
+        }
+
+        this.label = labels.join('\n');
+        cy.$(`#${this.id}`).data('label', this.label);
     }
 
     setupConnection(address) {
@@ -50,18 +122,42 @@ class Node {
             this.processSocket(socket);
             NodeMap.set(address, this);
         }).catch((err) => {
-            console.error("Connection refused:", address, err);
+            console.error('Connection refused:', address, err);
         });
+    }
+
+    renderCyNode() {
+        cy.add({
+            group: 'nodes',
+            data: { 
+                id: this.id,
+                label: this.label,
+            },
+        });
+        cy.layout(layout).run();
+    }
+
+    renderCyEdge(targetNode) {
+        cy.add({
+            group: 'edges', 
+            data: { 
+                id: `${this.id}-->${targetNode.id}`,
+                source: this.id,
+                target: targetNode.id,
+            }
+        });
+        cy.layout(layout).run();
     }
 }
 
-Node.makeNode = (origin, port) => {
+Node.makeNode = (origin, port, cy) => {
     return new Node(`ws://${origin}:${port}/status`);
 }
 
 function init() {
     const root = Node.makeNode('localhost', 8000);
-    NodeMap(root.address, root);
+    NodeMap.set(root.address, root);
+    layout.roots = [root.id];
 }
 
 window.addEventListener('DOMContentLoaded', init);
