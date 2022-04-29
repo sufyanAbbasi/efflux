@@ -95,45 +95,48 @@ func Apoptosis(ctx context.Context, cell *EukaryoticCell) bool {
 
 func ConsumeOxygen(ctx context.Context, cell *EukaryoticCell) bool {
 	// Receive a unit of 02 for a unit of CO2
-	result := cell.parent.RequestWork(Work{
+	cell.parent.RequestWork(Work{
 		workType: inhale,
 	})
-	if result.status == 200 {
-		cell.Lock()
-		cell.co2--
-		cell.o2++
-		cell.Unlock()
-	} else {
-		// Something bad's going on.
-	}
 	return true
 }
 
 func BloodExchangeGases(ctx context.Context, cell *EukaryoticCell) bool {
-	if cell.co2 > 0 {
-		// Exchange a unit of C02 for a unit of O2
-		result := cell.parent.RequestWork(Work{
-			workType: exhale,
-		})
-		if result.status == 200 {
-			cell.Lock()
-			cell.co2--
-			cell.o2++
-			cell.Unlock()
-		} else {
-			// No lung node available. Try exchanging with another blood.
-			result := cell.parent.RequestWork(Work{
-				workType: inhale,
-			})
-			if result.status == 200 {
-				cell.Lock()
-				cell.co2--
-				cell.Unlock()
-			} else {
-				// We're in trouble. Try again later.
-			}
-		}
-	}
+	// Exchange a unit of C02 for a unit of O2
+	cell.parent.RequestWork(Work{
+		workType: exhale,
+	})
+	return true
+}
+
+func MuscleFindFood(ctx context.Context, cell *EukaryoticCell) bool {
+	cell.parent.RequestWork(Work{
+		workType: think,
+	})
+	cell.parent.RequestWork(Work{
+		workType: cover,
+	})
+	return true
+}
+
+func MuscleSeekSkinProtection(ctx context.Context, cell *EukaryoticCell) bool {
+	cell.parent.RequestWork(Work{
+		workType: cover,
+	})
+	return true
+}
+
+func BrainControlMuscles(ctx context.Context, cell *EukaryoticCell) bool {
+	cell.parent.RequestWork(Work{
+		workType: move,
+	})
+	return true
+}
+
+func BrainRequestPump(ctx context.Context, cell *EukaryoticCell) bool {
+	cell.parent.RequestWork(Work{
+		workType: pump,
+	})
 	return true
 }
 
@@ -161,6 +164,51 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 				action: BloodExchangeGases,
 			},
 		}
+		currNode = currNode.next
+	case Neuron:
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: BrainRequestPump,
+			},
+		}
+		currNode = currNode.next
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: ConsumeOxygen,
+			},
+		}
+		currNode = currNode.next
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: BrainControlMuscles,
+			},
+		}
+		currNode = currNode.next
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: ConsumeOxygen,
+			},
+		}
+		currNode = currNode.next
+	case Myocyte:
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: MuscleFindFood,
+			},
+		}
+		currNode = currNode.next
+		fallthrough
+	case Cardiomyocyte:
+		fallthrough
+	case Pneumocyte:
+		fallthrough
+	case Keratinocyte:
+		fallthrough
 	default:
 		currNode.next = &StateNode{
 			next: nil,
@@ -168,8 +216,8 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 				action: ConsumeOxygen,
 			},
 		}
+		currNode = currNode.next
 	}
-	currNode = currNode.next
 	currNode.next = &StateNode{
 		next: s.root.next, // Do Work
 		function: &ProteinFunction{

@@ -54,6 +54,7 @@ type WorkSocketData struct {
 
 type StatusSocketData struct {
 	Status      int              `json:"status"`
+	Name        string           `json:"name"`
 	Connections []string         `json:"connections"`
 	WorkStatus  []WorkStatusData `json:"workStatus"`
 }
@@ -61,6 +62,8 @@ type StatusSocketData struct {
 type WorkStatusData struct {
 	WorkType       string `json:"workType"`
 	RequestCount   int    `json:"requestCount"`
+	SuccessCount   int    `json:"successCount"`
+	FailureCount   int    `json:"failureCount"`
 	CompletedCount int    `json:"completedCount"`
 }
 
@@ -100,6 +103,8 @@ type Manager struct {
 	nextAvailableWorker chan Worker
 	resultChan          chan Work
 	requestCount        int
+	successCount        int
+	failureCount        int
 	completedCount      int
 }
 
@@ -248,14 +253,19 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 			workStatus = append(workStatus, WorkStatusData{
 				WorkType:       workType.String(),
 				RequestCount:   manager.requestCount,
+				SuccessCount:   manager.successCount,
+				FailureCount:   manager.failureCount,
 				CompletedCount: manager.completedCount,
 			})
 			manager.requestCount = 0
+			manager.successCount = 0
+			manager.failureCount = 0
 			manager.completedCount = 0
 			manager.Unlock()
 		}
 		err := SendStatus(connection, StatusSocketData{
 			Status:      200,
+			Name:        n.name,
 			Connections: connections,
 			WorkStatus:  workStatus,
 		})
@@ -277,6 +287,9 @@ func (n *Node) RequestWork(request Work) (result Work) {
 		}
 		n.managers[request.workType] = manager
 	}
+	manager.Lock()
+	manager.requestCount++
+	manager.Unlock()
 	select {
 	case <-ctx.Done():
 		result = Work{
@@ -305,7 +318,11 @@ func (n *Node) RequestWork(request Work) (result Work) {
 		}
 	}
 	manager.Lock()
-	manager.requestCount++
+	if result.status == 200 {
+		manager.successCount++
+	} else {
+		manager.failureCount++
+	}
 	manager.Unlock()
 	return
 }

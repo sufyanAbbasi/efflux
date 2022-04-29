@@ -59,21 +59,21 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	workTypes := []WorkType{
-		inhale,
-		think,
-		pump,
-		exhale,
-		move,
-		cover,
+		inhale, // Blood
+		think,  // Brain
+		pump,   // Heart
+		exhale, // Lungs
+		move,   // Muscles
+		cover,  // Skin
 	}
 
 	counts := []int{
-		10, //50, // Blood: ideally enough to meet oxygen demand.
-		1,  //4,  // Brain: 4 lobes
-		1,  //2,  // Heart: 2 ventricles
-		5,  //50, // Lungs: enough to match demand from blood
-		1,  //10, // Muscles: large, demanding oxygen draw
-		1,  //30, // Skin: N*number of muscle cells
+		10, // Blood
+		10, // Brain
+		10, // Heart
+		10, // Lungs
+		10, // Muscles
+		10, // Skin
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
@@ -94,42 +94,42 @@ func GenerateBody(ctx context.Context) *Body {
 		dna: MakeDNA(HUMAN_DNA, HUMAN_NAME),
 	}
 	// Organs
-	brain := InitializeNewNode(ctx, b.Graph, "brain")
+	brain := InitializeNewNode(ctx, b.Graph, "Brain")
 	b.brainNodes = append(b.brainNodes, brain)
 
-	heart := InitializeNewNode(ctx, b.Graph, "heart")
+	heart := InitializeNewNode(ctx, b.Graph, "Heart")
 	b.heartNodes = append(b.heartNodes, heart)
 	ConnectNodes(ctx, heart, brain)
 
-	lungLeft := InitializeNewNode(ctx, b.Graph, "lungLeft")
+	lungLeft := InitializeNewNode(ctx, b.Graph, "Left Lung")
 	b.lungNodes = append(b.lungNodes, lungLeft)
 
-	lungRight := InitializeNewNode(ctx, b.Graph, "lungRight")
+	lungRight := InitializeNewNode(ctx, b.Graph, "Right Lung")
 	b.lungNodes = append(b.lungNodes, lungRight)
 
 	// Muscles and Skin
 
 	// Left Arm
-	muscleLeftArm := InitializeNewNode(ctx, b.Graph, "muscleLeftArm")
-	skinLeftArm := InitializeNewNode(ctx, b.Graph, "skinLeftArm")
+	muscleLeftArm := InitializeNewNode(ctx, b.Graph, "Left Arm Muscle")
+	skinLeftArm := InitializeNewNode(ctx, b.Graph, "Left Arm Skin")
 	ConnectNodes(ctx, muscleLeftArm, skinLeftArm)
 	ConnectNodes(ctx, muscleLeftArm, brain)
 
 	// Right Arm
-	muscleRightArm := InitializeNewNode(ctx, b.Graph, "muscleRightArm")
-	skinRightArm := InitializeNewNode(ctx, b.Graph, "skinRightArm")
+	muscleRightArm := InitializeNewNode(ctx, b.Graph, "Right Arm Muscle")
+	skinRightArm := InitializeNewNode(ctx, b.Graph, "Right Arm Skin")
 	ConnectNodes(ctx, muscleRightArm, skinRightArm)
 	ConnectNodes(ctx, muscleRightArm, brain)
 
 	// Left Leg
-	muscleLeftLeg := InitializeNewNode(ctx, b.Graph, "muscleLeftLeg")
-	skinLeftLeg := InitializeNewNode(ctx, b.Graph, "skinLeftLeg")
+	muscleLeftLeg := InitializeNewNode(ctx, b.Graph, "Left Leg Muscle")
+	skinLeftLeg := InitializeNewNode(ctx, b.Graph, "Left Leg Skin")
 	ConnectNodes(ctx, muscleLeftLeg, skinLeftLeg)
 	ConnectNodes(ctx, muscleLeftLeg, brain)
 
 	// Right Leg
-	muscleRightLeg := InitializeNewNode(ctx, b.Graph, "muscleRightLeg")
-	skinRightLeg := InitializeNewNode(ctx, b.Graph, "skinRightLeg")
+	muscleRightLeg := InitializeNewNode(ctx, b.Graph, "Right Leg Muscle")
+	skinRightLeg := InitializeNewNode(ctx, b.Graph, "Right Leg Skin")
 	ConnectNodes(ctx, muscleRightLeg, skinRightLeg)
 	ConnectNodes(ctx, muscleRightLeg, brain)
 
@@ -148,29 +148,29 @@ func GenerateBody(ctx context.Context) *Body {
 
 	// Blood
 
-	bloodBrain := InitializeNewNode(ctx, b.Graph, "bloodBrain")
+	bloodBrain := InitializeNewNode(ctx, b.Graph, "Blood - Brain")
 	ConnectNodes(ctx, bloodBrain, brain)
-	bloodHeart := InitializeNewNode(ctx, b.Graph, "bloodHeart")
+	bloodHeart := InitializeNewNode(ctx, b.Graph, "Blood - Heart")
 	ConnectNodes(ctx, bloodHeart, heart)
 	ConnectNodes(ctx, bloodBrain, bloodHeart)
-	bloodLung := InitializeNewNode(ctx, b.Graph, "bloodLung")
+	bloodLung := InitializeNewNode(ctx, b.Graph, "Blood - Lung")
 	ConnectNodes(ctx, bloodLung, lungLeft)
 	ConnectNodes(ctx, bloodLung, lungRight)
 	ConnectNodes(ctx, bloodLung, bloodHeart)
-	bloodTorso := InitializeNewNode(ctx, b.Graph, "bloodTorso")
+	bloodTorso := InitializeNewNode(ctx, b.Graph, "Blood - Torso")
 	ConnectNodes(ctx, bloodTorso, bloodLung)
 	ConnectNodes(ctx, bloodTorso, lungLeft)
 	ConnectNodes(ctx, bloodTorso, lungRight)
-	bloodLeftArm := InitializeNewNode(ctx, b.Graph, "bloodLeftArm")
+	bloodLeftArm := InitializeNewNode(ctx, b.Graph, "Blood - Left Arm")
 	ConnectNodes(ctx, bloodLeftArm, muscleLeftArm)
 	ConnectNodes(ctx, bloodLeftArm, bloodTorso)
-	bloodRightArm := InitializeNewNode(ctx, b.Graph, "bloodRightArm")
+	bloodRightArm := InitializeNewNode(ctx, b.Graph, "Blood - Right Arm")
 	ConnectNodes(ctx, bloodRightArm, muscleRightArm)
 	ConnectNodes(ctx, bloodRightArm, bloodTorso)
-	bloodLeftLeg := InitializeNewNode(ctx, b.Graph, "bloodLeftLeg")
+	bloodLeftLeg := InitializeNewNode(ctx, b.Graph, "Blood - Left Leg")
 	ConnectNodes(ctx, bloodLeftLeg, muscleLeftLeg)
 	ConnectNodes(ctx, bloodLeftLeg, bloodTorso)
-	bloodRightLeg := InitializeNewNode(ctx, b.Graph, "bloodRightLeg")
+	bloodRightLeg := InitializeNewNode(ctx, b.Graph, "Blood - Right Leg")
 	ConnectNodes(ctx, bloodRightLeg, muscleRightLeg)
 	ConnectNodes(ctx, bloodRightLeg, bloodTorso)
 	b.bloodNodes = append(b.bloodNodes,
@@ -186,24 +186,24 @@ func GenerateBody(ctx context.Context) *Body {
 
 	// Lymph Nodes
 
-	lymphHeart := InitializeNewNode(ctx, b.Graph, "lymphHeart")
+	lymphHeart := InitializeNewNode(ctx, b.Graph, "Lymph - Heart")
 	ConnectNodes(ctx, lymphHeart, bloodHeart)
-	lymphLung := InitializeNewNode(ctx, b.Graph, "lymphLung")
+	lymphLung := InitializeNewNode(ctx, b.Graph, "Lymph - Lung")
 	ConnectNodes(ctx, lymphLung, bloodLung)
 	ConnectNodes(ctx, lymphLung, lymphHeart)
-	lymphTorso := InitializeNewNode(ctx, b.Graph, "lymphTorso")
+	lymphTorso := InitializeNewNode(ctx, b.Graph, "Lymph - Torso")
 	ConnectNodes(ctx, lymphTorso, bloodTorso)
 	ConnectNodes(ctx, lymphTorso, lymphLung)
-	lymphLeftArm := InitializeNewNode(ctx, b.Graph, "lymphLeftArm")
+	lymphLeftArm := InitializeNewNode(ctx, b.Graph, "Lymph - LeftArm")
 	ConnectNodes(ctx, lymphLeftArm, bloodLeftArm)
 	ConnectNodes(ctx, lymphLeftArm, lymphTorso)
-	lymphRightArm := InitializeNewNode(ctx, b.Graph, "lymphRightArm")
+	lymphRightArm := InitializeNewNode(ctx, b.Graph, "Lymph - RightArm")
 	ConnectNodes(ctx, lymphRightArm, bloodRightArm)
 	ConnectNodes(ctx, lymphRightArm, lymphTorso)
-	lymphLeftLeg := InitializeNewNode(ctx, b.Graph, "lymphLeftLeg")
+	lymphLeftLeg := InitializeNewNode(ctx, b.Graph, "Lymph - LeftLeg")
 	ConnectNodes(ctx, lymphLeftLeg, bloodLeftLeg)
 	ConnectNodes(ctx, lymphLeftLeg, lymphTorso)
-	lymphRightLeg := InitializeNewNode(ctx, b.Graph, "lymphRightLeg")
+	lymphRightLeg := InitializeNewNode(ctx, b.Graph, "Lymph - RightLeg")
 	ConnectNodes(ctx, lymphRightLeg, bloodRightLeg)
 	ConnectNodes(ctx, lymphRightLeg, lymphTorso)
 	b.lymphNodes = append(b.lymphNodes,
@@ -217,13 +217,13 @@ func GenerateBody(ctx context.Context) *Body {
 	)
 
 	// Bone Marrow
-	boneLeftArm := InitializeNewNode(ctx, b.Graph, "boneLeftArm")
+	boneLeftArm := InitializeNewNode(ctx, b.Graph, "Bone - Left Arm")
 	ConnectNodes(ctx, boneLeftArm, bloodLeftArm)
-	boneRightArm := InitializeNewNode(ctx, b.Graph, "boneRightArm")
+	boneRightArm := InitializeNewNode(ctx, b.Graph, "Bone - Right Arm")
 	ConnectNodes(ctx, boneRightArm, bloodRightArm)
-	boneLeftLeg := InitializeNewNode(ctx, b.Graph, "boneLeftLeg")
+	boneLeftLeg := InitializeNewNode(ctx, b.Graph, "Bone - Left Leg")
 	ConnectNodes(ctx, boneLeftLeg, bloodLeftLeg)
-	boneRightLeg := InitializeNewNode(ctx, b.Graph, "boneRightLeg")
+	boneRightLeg := InitializeNewNode(ctx, b.Graph, "Bone - Right Leg")
 	ConnectNodes(ctx, boneRightLeg, bloodRightLeg)
 	b.boneNodes = append(b.boneNodes,
 		boneLeftArm,

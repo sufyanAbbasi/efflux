@@ -2,7 +2,7 @@ package main
 
 import "time"
 
-const TIMEOUT_SEC = 1 * time.Second
+const TIMEOUT_SEC = 5 * time.Second
 
 const ORIGIN = "http://localhost/"
 const URL_TEMPLATE = "http://localhost:%v"

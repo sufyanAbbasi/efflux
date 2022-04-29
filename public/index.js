@@ -15,8 +15,8 @@ const cy = cytoscape({
           'background-color': 'white',
           'border-width': '2px',
           'border-color': '#666',
-          'width': '330px',
-          'height': '100px',
+          'width': '550px',
+          'height': '150px',
           'text-wrap': 'wrap',
           'text-justification': 'left',
           'font-family': 'monospace',
@@ -50,6 +50,7 @@ class Node {
     constructor(address) {
         this.address = address;
         this.id = address.replace( /\D/g, '');
+        this.name = 'Unknown';
         this.label = `Initializing Node ${this.id}...`;
         this.status = null;
         this.socket = null;
@@ -77,6 +78,7 @@ class Node {
             data = null;
         }
         this.status = data;
+        this.name = data.name || 'Unknown';
 
         if (this.status.connections) {
             for (const address of this.status.connections) {
@@ -94,16 +96,16 @@ class Node {
     }
 
     updateLabel(workStatuses) {
-        const labels = [`Node ID: ${this.id}`.padStart(20).padEnd(40)];
+        const labels = [`${this.name} (${this.id})`.padStart(20).padEnd(40)];
 
         if (!workStatuses) {
             labels.push('(no work status)'.padStart(10).padEnd(20))
         } else {
             const makePadding = (str) => String(str).padStart(5).padEnd(10);
-            labels.push(`${makePadding('Work')}|${makePadding('Requested')}|${makePadding('Completed')}`);
-            labels.push(`--------------------------------`);
-            for (const {workType, requestCount, completedCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
-                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(completedCount)}`);
+            labels.push(`${makePadding('Work')}|${makePadding('Requests')}|${makePadding('Successes')}|${makePadding('Failures')}|${makePadding('Completed')}`);
+            labels.push(''.padStart(55, '-'));
+            for (const {workType, requestCount, successCount, failureCount, completedCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
+                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(successCount)}|${makePadding(failureCount)}|${makePadding(completedCount)}`);
             }
         }
 

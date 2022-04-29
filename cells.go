@@ -53,8 +53,6 @@ type Cell struct {
 	antigen  *Antigen
 	workType WorkType
 	parent   *Node
-	co2      int
-	o2       int
 }
 
 func (c *Cell) SetParent(node *Node) {
@@ -76,29 +74,18 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	c.Lock()
 	switch c.cellType {
 	case RedBlood:
-		// Request to exchange CO2 for O2
-		c.co2++
-		if c.o2 > 0 {
-			c.o2--
-			request.status = 200
-			request.result = "Completed."
-		} else {
-			request.status = 500
-			request.result = "Not enough oxygen."
-		}
+		fallthrough
+	case Pneumocyte:
+		fallthrough
 	case Keratinocyte:
 		fallthrough
 	case Neuron:
 		fallthrough
 	case Cardiomyocyte:
 		fallthrough
-	case Pneumocyte:
-		fallthrough
 	case Myocyte:
 		fallthrough
 	default:
-		c.o2--
-		c.co2++
 		request.status = 200
 		request.result = "Completed."
 	}
