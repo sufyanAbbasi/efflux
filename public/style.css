@@ -7,3 +7,9 @@ html, body {
     height: 100%;
     width: 100%;
 }
+
+.menu {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+}

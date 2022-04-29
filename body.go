@@ -68,12 +68,12 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	counts := []int{
-		10, // Blood
-		10, // Brain
-		10, // Heart
-		10, // Lungs
-		10, // Muscles
-		10, // Skin
+		100, // Blood
+		50,  // Brain
+		10,  // Heart
+		10,  // Lungs
+		10,  // Muscles
+		10,  // Skin
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
@@ -186,24 +186,24 @@ func GenerateBody(ctx context.Context) *Body {
 
 	// Lymph Nodes
 
-	lymphHeart := InitializeNewNode(ctx, b.Graph, "Lymph - Heart")
+	lymphHeart := InitializeNewNode(ctx, b.Graph, "Lymph Node - Heart")
 	ConnectNodes(ctx, lymphHeart, bloodHeart)
-	lymphLung := InitializeNewNode(ctx, b.Graph, "Lymph - Lung")
+	lymphLung := InitializeNewNode(ctx, b.Graph, "Lymph Node - Lung")
 	ConnectNodes(ctx, lymphLung, bloodLung)
 	ConnectNodes(ctx, lymphLung, lymphHeart)
-	lymphTorso := InitializeNewNode(ctx, b.Graph, "Lymph - Torso")
+	lymphTorso := InitializeNewNode(ctx, b.Graph, "Lymph Node - Torso")
 	ConnectNodes(ctx, lymphTorso, bloodTorso)
 	ConnectNodes(ctx, lymphTorso, lymphLung)
-	lymphLeftArm := InitializeNewNode(ctx, b.Graph, "Lymph - LeftArm")
+	lymphLeftArm := InitializeNewNode(ctx, b.Graph, "Lymph Node - Left Arm")
 	ConnectNodes(ctx, lymphLeftArm, bloodLeftArm)
 	ConnectNodes(ctx, lymphLeftArm, lymphTorso)
-	lymphRightArm := InitializeNewNode(ctx, b.Graph, "Lymph - RightArm")
+	lymphRightArm := InitializeNewNode(ctx, b.Graph, "Lymph Node - Right Arm")
 	ConnectNodes(ctx, lymphRightArm, bloodRightArm)
 	ConnectNodes(ctx, lymphRightArm, lymphTorso)
-	lymphLeftLeg := InitializeNewNode(ctx, b.Graph, "Lymph - LeftLeg")
+	lymphLeftLeg := InitializeNewNode(ctx, b.Graph, "Lymph Node - Left Leg")
 	ConnectNodes(ctx, lymphLeftLeg, bloodLeftLeg)
 	ConnectNodes(ctx, lymphLeftLeg, lymphTorso)
-	lymphRightLeg := InitializeNewNode(ctx, b.Graph, "Lymph - RightLeg")
+	lymphRightLeg := InitializeNewNode(ctx, b.Graph, "Lymph Node - Right Leg")
 	ConnectNodes(ctx, lymphRightLeg, bloodRightLeg)
 	ConnectNodes(ctx, lymphRightLeg, lymphTorso)
 	b.lymphNodes = append(b.lymphNodes,

@@ -50,7 +50,7 @@ class Node {
     constructor(address) {
         this.address = address;
         this.id = address.replace( /\D/g, '');
-        this.name = 'Unknown';
+        this.name = `Unknown ${this.id}`;
         this.label = `Initializing Node ${this.id}...`;
         this.status = null;
         this.socket = null;
@@ -78,7 +78,11 @@ class Node {
             data = null;
         }
         this.status = data;
-        this.name = data.name || 'Unknown';
+        this.name = data.name ? `${data.name} (${this.id})` : 'Unknown';
+        let option = document.querySelector(`option[value="#${this.id}"]`);
+        if (!option) {
+            this.renderSelection();
+        }
 
         if (this.status.connections) {
             for (const address of this.status.connections) {
@@ -96,7 +100,7 @@ class Node {
     }
 
     updateLabel(workStatuses) {
-        const labels = [`${this.name} (${this.id})`.padStart(20).padEnd(40)];
+        const labels = [this.name.padStart(20).padEnd(40)];
 
         if (!workStatuses) {
             labels.push('(no work status)'.padStart(10).padEnd(20))
@@ -150,6 +154,19 @@ class Node {
         });
         cy.layout(layout).run();
     }
+
+    renderSelection() {
+        const option = document.createElement('option');
+        option.setAttribute('value', `#${this.id}`);
+        option.textContent = this.name;
+        let optgroup = document.querySelector('optgroup[label="Organs"]');
+        for (let findOptGroup of document.querySelectorAll('optgroup')) {
+            if (this.name.indexOf(findOptGroup.getAttribute('label')) > -1) {
+                optgroup = findOptGroup;
+            }
+        }
+        optgroup.appendChild(option)
+    }
 }
 
 Node.makeNode = (origin, port, cy) => {
@@ -157,6 +174,10 @@ Node.makeNode = (origin, port, cy) => {
 }
 
 function init() {
+    const selector = document.querySelector('select');
+    selector.addEventListener('change', () => {
+        cy.fit(cy.$(selector.value));
+    })
     const root = Node.makeNode('localhost', 8000);
     NodeMap.set(root.address, root);
     layout.roots = [root.id];

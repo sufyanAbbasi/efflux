@@ -14,7 +14,7 @@ type StateDiagram struct {
 func (s *StateDiagram) Run(ctx context.Context, cell *EukaryoticCell) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(CELL_CLOCK_RATE)
 	if s.root != nil {
 		s.current = s.root
 		for {
@@ -88,7 +88,7 @@ func ShouldApoptosis(ctx context.Context, cell *EukaryoticCell) bool {
 }
 
 func Apoptosis(ctx context.Context, cell *EukaryoticCell) bool {
-	fmt.Println("Apoptosis")
+	fmt.Println(cell, " Died!")
 	cell.Apoptosis()
 	return false
 }
@@ -112,9 +112,6 @@ func BloodExchangeGases(ctx context.Context, cell *EukaryoticCell) bool {
 func MuscleFindFood(ctx context.Context, cell *EukaryoticCell) bool {
 	cell.parent.RequestWork(Work{
 		workType: think,
-	})
-	cell.parent.RequestWork(Work{
-		workType: cover,
 	})
 	return true
 }
@@ -194,6 +191,8 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
+	case Keratinocyte:
+		// Do nothing.
 	case Myocyte:
 		currNode.next = &StateNode{
 			next: nil,
@@ -202,12 +201,17 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action: MuscleSeekSkinProtection,
+			},
+		}
+		currNode = currNode.next
 		fallthrough
 	case Cardiomyocyte:
 		fallthrough
 	case Pneumocyte:
-		fallthrough
-	case Keratinocyte:
 		fallthrough
 	default:
 		currNode.next = &StateNode{

@@ -215,7 +215,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 		if ok {
 			if work.status == 0 {
 				// Recieved work request.
-				ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT_SEC)
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 				select {
 				case w := <-manager.nextAvailableWorker:
 					finishedWork := w.Work(ctx, work)
@@ -239,7 +239,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 
 func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 	defer connection.Close()
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		<-ticker.C
 		var connections []string

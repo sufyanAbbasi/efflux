@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"time"
 )
 
 type CellType int
@@ -122,6 +123,8 @@ type EukaryoticCell struct {
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
+	// Add a random delay to offset cells.
+	time.Sleep(time.Duration(rand.Float32()*100) * time.Millisecond)
 	e.function = e.dna.makeFunction(e)
 	e.function.Run(ctx, e)
 }
