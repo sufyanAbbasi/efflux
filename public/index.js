@@ -14,7 +14,7 @@ const cy = cytoscape({
           'shape': 'rectangle',
           'background-color': 'white',
           'border-width': '2px',
-          'border-color': '#666',
+          'border-color': 'black',
           'width': '550px',
           'height': '150px',
           'text-wrap': 'wrap',
@@ -170,7 +170,8 @@ class Node {
 }
 
 Node.makeNode = (origin, port, cy) => {
-    return new Node(`ws://${origin}:${port}/status`);
+    const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
+    return new Node(`${scheme}${origin}:${port}/status`);
 }
 
 function init() {
@@ -178,7 +179,7 @@ function init() {
     selector.addEventListener('change', () => {
         cy.fit(cy.$(selector.value));
     })
-    const root = Node.makeNode('localhost', 8000);
+    const root = Node.makeNode(window.location.hostname, 8000);
     NodeMap.set(root.address, root);
     layout.roots = [root.id];
 }

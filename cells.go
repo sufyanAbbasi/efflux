@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -48,12 +49,13 @@ func (c CellType) String() string {
 
 type Cell struct {
 	sync.RWMutex
-	cellType CellType
-	dna      *DNA
-	mhc_i    MHC_I
-	antigen  *Antigen
-	workType WorkType
-	parent   *Node
+	cellType     CellType
+	dna          *DNA
+	mhc_i        MHC_I
+	antigen      *Antigen
+	workType     WorkType
+	parent       *Node
+	resourceNeed *ResourceBlob
 }
 
 func (c *Cell) SetParent(node *Node) {
@@ -72,11 +74,29 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	if request.workType != c.workType {
 		log.Fatalf("Cell %v is unable to perform work: %v", c, request)
 	}
+	if c.parent.materialPool != nil && !c.CollectResources(ctx) {
+		request.status = 503
+		request.result = "Not enough resources."
+		return request
+	}
 	c.Lock()
 	switch c.cellType {
 	case RedBlood:
-		fallthrough
+		waste := c.parent.materialPool.GetWaste()
+		waste.co2 += 6
+		c.parent.materialPool.PutWaste(waste)
+		resource := c.parent.materialPool.GetResource()
+		if resource.o2 >= 6 {
+			resource.o2 = 0
+		} else {
+			resource.o2 -= 6
+		}
+		c.parent.materialPool.PutResource(resource)
+		request.status = 200
+		request.result = "Completed."
 	case Pneumocyte:
+		// 6 CO2 will be removed at destination
+		// 6 O2 added at destination
 		fallthrough
 	case Keratinocyte:
 		fallthrough
@@ -89,14 +109,10 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	default:
 		request.status = 200
 		request.result = "Completed."
+		c.ProduceWaste()
 	}
 	c.Unlock()
 	return request
-}
-
-type AntigenPresenting interface {
-	PresentAntigen() *Antigen
-	DNA() *DNA
 }
 
 func (c *Cell) SampleProteins() []Protein {
@@ -109,6 +125,53 @@ func (c *Cell) PresentAntigen() *Antigen {
 		c.antigen = c.dna.GenerateAntigen(c.SampleProteins())
 	}
 	return c.antigen
+}
+
+func (c *Cell) ResetResourceNeed() {
+	switch c.cellType {
+	case Keratinocyte:
+		fallthrough
+	case RedBlood:
+		c.resourceNeed = &ResourceBlob{
+			o2: 0,
+		}
+	case Neuron:
+		fallthrough
+	case Pneumocyte:
+		fallthrough
+	case Cardiomyocyte:
+		fallthrough
+	case Myocyte:
+		fallthrough
+	default:
+		c.resourceNeed = &ResourceBlob{
+			o2: 6,
+		}
+	}
+}
+
+func (c *Cell) CollectResources(ctx context.Context) bool {
+	if c.resourceNeed == nil {
+		c.ResetResourceNeed()
+	}
+	for !reflect.DeepEqual(c.resourceNeed, new(ResourceBlob)) {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+			resource := c.parent.materialPool.GetResource()
+			resource.Consume(c.resourceNeed)
+			c.parent.materialPool.PutResource(resource)
+		}
+	}
+	c.ResetResourceNeed()
+	return true
+}
+
+func (c *Cell) ProduceWaste() {
+	waste := c.parent.materialPool.GetWaste()
+	waste.co2 += 6
+	c.parent.materialPool.PutWaste(waste)
 }
 
 func (c *Cell) DNA() *DNA {
@@ -205,6 +268,11 @@ func (v *Virus) InfectCell(c *Cell) {
 
 type ImmuneCell struct {
 	Cell
+}
+
+type AntigenPresenting interface {
+	PresentAntigen() *Antigen
+	DNA() *DNA
 }
 
 func (i *ImmuneCell) CheckAntigen(c AntigenPresenting) bool {

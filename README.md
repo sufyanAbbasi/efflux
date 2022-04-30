@@ -204,4 +204,55 @@ cell can die according to its type and internal state.
 Cells present their current state by taking a random sample of the proteins
 within them and presenting them on the cell surface. These proteins represent
 the internal state of the cell. Therefore, we can associate each action with
-a set of proteins 
+a set of proteins which are accessible on the cell, which the immune system
+cells can use to detect any malpractice.
+
+### Resource and Waste Management
+
+In order for the body to function it needs resources, particularly vitamins and
+oxygen. Cells use vitamins to build and function properly and oxygen for 
+cellular respiration, converting glucose and oxygen into ATP, CO2, and water.
+
+In order to breathe and share resources, each organ node is connected to a blood
+node and lymph node. Lymph nodes and vessels run alongside blood vessels to 
+collect excess fluid, clean up ditritus, and diffuse vitamins to places where
+blood may have missed. The lymphatic system is essentially a slow moving 
+extension of the blood, carrying stuff around to various lymph nodes, including
+antigens.
+
+In order to manage resources, each server node contains a resource pool that is
+shared by the cells in the node. Each cell has a minimum requirement of 
+resources in order to get some work done, and if met, the cell will perform the
+work; otherwise, it'll fail. In order for a node to get resources, it can obtain
+it in one of two ways:
+
+1. Work done by other cells, like blood oxygen exchange, or
+1. Random diffusion from the blood or lymph nodes.
+
+That way, even if cells themselves can't perform the actions they need to,
+natural diffusion can grant relief to cells in need of stuff.
+
+Resources include:
+1. O2
+1. Vitamins (synthesized by bacteria in the gut)
+
+Cells (and bacteria) also produce waste byproducts: mostly carbon dioxide, but
+in the case of bacteria, toxins like ammonia. Waste is managed as a resource
+pool as well: whenever waste is generated, it gets put into a pool. Eventually,
+some diffusion needs to happen to transport the waste to a place where it can be
+managed, like the liver and kidneys. The lymphatic system along with blood 
+stream is where waste gets collected, so natural diffusion should happen from
+the various organs into the blood and lymph.
+
+#### Implementation Details
+[`sync.Pool`](https://pkg.go.dev/sync#Pool) provides an efficient way to manage
+freely created objects which can be shared with any number of go routines. This
+allows to quickly retrieve a resource or waste blob, update it, then put it
+back for someone else to consume. 
+
+Diffusion can be implemented as a shortcut to work in order to not have to 
+create a new socket connection between nodes. We'll use special worktypes,
+`diffusion`, which will not require a cell worker to complete, instead, we
+can use the `results` field to serialize the `ResourceBlob` and `WasteBlob`
+values. Diffusion requests that are sent to non-lymph and non-blood can be
+returned by diffusion back the other way.

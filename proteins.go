@@ -93,19 +93,44 @@ func Apoptosis(ctx context.Context, cell *EukaryoticCell) bool {
 	return false
 }
 
-func ConsumeOxygen(ctx context.Context, cell *EukaryoticCell) bool {
+func Respirate(ctx context.Context, cell *EukaryoticCell) bool {
 	// Receive a unit of 02 for a unit of CO2
-	cell.parent.RequestWork(Work{
+	request := cell.parent.RequestWork(Work{
 		workType: inhale,
 	})
+	if request.status == 200 {
+		resource := cell.parent.materialPool.GetResource()
+		resource.o2 += 6
+		cell.parent.materialPool.PutResource(resource)
+		waste := cell.parent.materialPool.GetWaste()
+		if waste.co2 <= 6 {
+			waste.co2 = 0
+		} else {
+			waste.co2 -= 6
+		}
+		cell.parent.materialPool.PutWaste(waste)
+	}
 	return true
 }
 
-func BloodExchangeGases(ctx context.Context, cell *EukaryoticCell) bool {
+func Expirate(ctx context.Context, cell *EukaryoticCell) bool {
 	// Exchange a unit of C02 for a unit of O2
-	cell.parent.RequestWork(Work{
+	request := cell.parent.RequestWork(Work{
 		workType: exhale,
 	})
+	if request.status == 200 {
+		waste := cell.parent.materialPool.GetWaste()
+		if waste.co2 <= 6 {
+			waste.co2 = 0
+		} else {
+			waste.co2 -= 6
+		}
+		cell.parent.materialPool.PutWaste(waste)
+
+		resource := cell.parent.materialPool.GetResource()
+		resource.o2 += 6
+		cell.parent.materialPool.PutResource(resource)
+	}
 	return true
 }
 
@@ -158,7 +183,7 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: BloodExchangeGases,
+				action: Expirate,
 			},
 		}
 		currNode = currNode.next
@@ -173,7 +198,7 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: ConsumeOxygen,
+				action: Respirate,
 			},
 		}
 		currNode = currNode.next
@@ -187,7 +212,7 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: ConsumeOxygen,
+				action: Respirate,
 			},
 		}
 		currNode = currNode.next
@@ -217,7 +242,7 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: ConsumeOxygen,
+				action: Respirate,
 			},
 		}
 		currNode = currNode.next

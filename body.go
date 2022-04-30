@@ -68,12 +68,12 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	counts := []int{
-		100, // Blood
-		50,  // Brain
-		10,  // Heart
-		10,  // Lungs
-		10,  // Muscles
-		10,  // Skin
+		25, // Blood
+		10, // Brain
+		10, // Heart
+		50, // Lungs
+		3,  // Muscles
+		3,  // Skin
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
@@ -150,8 +150,12 @@ func GenerateBody(ctx context.Context) *Body {
 
 	bloodBrain := InitializeNewNode(ctx, b.Graph, "Blood - Brain")
 	ConnectNodes(ctx, bloodBrain, brain)
+	ConnectNodes(ctx, bloodBrain, lungLeft)
+	ConnectNodes(ctx, bloodBrain, lungRight)
 	bloodHeart := InitializeNewNode(ctx, b.Graph, "Blood - Heart")
 	ConnectNodes(ctx, bloodHeart, heart)
+	ConnectNodes(ctx, bloodHeart, lungLeft)
+	ConnectNodes(ctx, bloodHeart, lungRight)
 	ConnectNodes(ctx, bloodBrain, bloodHeart)
 	bloodLung := InitializeNewNode(ctx, b.Graph, "Blood - Lung")
 	ConnectNodes(ctx, bloodLung, lungLeft)
@@ -163,15 +167,23 @@ func GenerateBody(ctx context.Context) *Body {
 	ConnectNodes(ctx, bloodTorso, lungRight)
 	bloodLeftArm := InitializeNewNode(ctx, b.Graph, "Blood - Left Arm")
 	ConnectNodes(ctx, bloodLeftArm, muscleLeftArm)
+	ConnectNodes(ctx, bloodLeftArm, lungLeft)
+	ConnectNodes(ctx, bloodLeftArm, lungRight)
 	ConnectNodes(ctx, bloodLeftArm, bloodTorso)
 	bloodRightArm := InitializeNewNode(ctx, b.Graph, "Blood - Right Arm")
 	ConnectNodes(ctx, bloodRightArm, muscleRightArm)
+	ConnectNodes(ctx, bloodRightArm, lungLeft)
+	ConnectNodes(ctx, bloodRightArm, lungRight)
 	ConnectNodes(ctx, bloodRightArm, bloodTorso)
 	bloodLeftLeg := InitializeNewNode(ctx, b.Graph, "Blood - Left Leg")
 	ConnectNodes(ctx, bloodLeftLeg, muscleLeftLeg)
+	ConnectNodes(ctx, bloodLeftLeg, lungLeft)
+	ConnectNodes(ctx, bloodLeftLeg, lungRight)
 	ConnectNodes(ctx, bloodLeftLeg, bloodTorso)
 	bloodRightLeg := InitializeNewNode(ctx, b.Graph, "Blood - Right Leg")
 	ConnectNodes(ctx, bloodRightLeg, muscleRightLeg)
+	ConnectNodes(ctx, bloodRightLeg, lungLeft)
+	ConnectNodes(ctx, bloodRightLeg, lungRight)
 	ConnectNodes(ctx, bloodRightLeg, bloodTorso)
 	b.bloodNodes = append(b.bloodNodes,
 		bloodBrain,

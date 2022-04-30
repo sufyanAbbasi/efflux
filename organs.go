@@ -117,6 +117,7 @@ type Node struct {
 	port         string
 	websocketUrl string
 	managers     map[WorkType]*Manager
+	materialPool *MaterialPool
 }
 
 var currentPort = 7999
@@ -138,6 +139,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 		websocketUrl: websocketUrl,
 		managers:     make(map[WorkType]*Manager),
 	}
+	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
 	node.Start(ctx)
 	return node
@@ -149,8 +151,8 @@ func (n *Node) String() string {
 
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
-	n.serverMux.Handle("/work", websocket.Handler(n.ProcessIncomingWorkRequests))
-	n.serverMux.Handle("/status", websocket.Handler(n.GetNodeStatus))
+	n.serverMux.Handle(WORK_ENDPOINT, websocket.Handler(n.ProcessIncomingWorkRequests))
+	n.serverMux.Handle(STATUS_ENDPOINT, websocket.Handler(n.GetNodeStatus))
 
 	go func() {
 		err := http.ListenAndServe(n.port, n.serverMux)
@@ -215,7 +217,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 		if ok {
 			if work.status == 0 {
 				// Recieved work request.
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 				select {
 				case w := <-manager.nextAvailableWorker:
 					finishedWork := w.Work(ctx, work)
@@ -231,8 +233,6 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 				// Received completed work, which is not expected.
 				log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
 			}
-		} else {
-			// fmt.Printf("%v Unable to fulfill request: %v\n", n, work)
 		}
 	}
 }
