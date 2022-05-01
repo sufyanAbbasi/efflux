@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"reflect"
 	"sync"
-	"time"
 )
 
 type CellType int
@@ -186,24 +185,22 @@ type EukaryoticCell struct {
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
-	// Add a random delay to offset cells.
-	time.Sleep(time.Duration(rand.Float32()*100) * time.Millisecond)
 	e.function = e.dna.makeFunction(e)
-	e.function.Run(ctx, e)
+	go e.function.Run(ctx, e)
 }
 
 func (e *EukaryoticCell) Mitosis() *EukaryoticCell {
 	if e.telomereLength <= 0 {
 		return nil
 	}
-	if !e.hasTelomerase {
-		// Stem cell, have telomerase which prevent telomere decrease.
-		e.telomereLength--
-	}
+	e.hasTelomerase = false
+	e.telomereLength--
 	cell := MakeEukaryoticStemCell(e.dna, e.cellType, e.workType)
+	cell.parent = e.parent
 	cell.telomereLength = e.telomereLength
+	cell.hasTelomerase = false
 	if e.parent != nil {
-		e.parent.AddWorker(e)
+		e.parent.AddWorker(cell)
 	}
 	return cell
 }

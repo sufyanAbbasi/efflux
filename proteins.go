@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -12,6 +13,8 @@ type StateDiagram struct {
 }
 
 func (s *StateDiagram) Run(ctx context.Context, cell *EukaryoticCell) {
+	// Add a random delay to offset cells.
+	time.Sleep(time.Duration(rand.Float32()*100) * time.Millisecond)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ticker := time.NewTicker(CELL_CLOCK_RATE)
@@ -72,9 +75,21 @@ func DoWork(ctx context.Context, cell *EukaryoticCell) bool {
 }
 
 func StemCellToSpecializedCell(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.Mitosis()
-	// Loses stem cell status after first mitosis.
-	cell.hasTelomerase = false
+	if cell.hasTelomerase {
+		// Loses stem cell status after first mitosis.
+		c := cell.Mitosis()
+		fmt.Println(c)
+		c.Start(ctx)
+	}
+	return true
+}
+
+func ShouldMitosis(ctx context.Context, cell *EukaryoticCell) bool {
+	// TODO: Check some conditions for cell reproduction.
+	if false {
+		c := cell.Mitosis()
+		c.Start(ctx)
+	}
 	return true
 }
 
@@ -247,6 +262,13 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		}
 		currNode = currNode.next
 	}
+	currNode.next = &StateNode{
+		next: nil,
+		function: &ProteinFunction{
+			action: ShouldMitosis,
+		},
+	}
+	currNode = currNode.next
 	currNode.next = &StateNode{
 		next: s.root.next, // Do Work
 		function: &ProteinFunction{

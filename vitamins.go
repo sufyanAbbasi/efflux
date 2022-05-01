@@ -7,6 +7,11 @@ type ResourceBlob struct {
 	vitamins int
 }
 
+type ResourceBlobData struct {
+	O2       int
+	Vitamins int
+}
+
 func (r *ResourceBlob) Consume(need *ResourceBlob) {
 	if r.o2 >= need.o2 {
 		r.o2 = r.o2 - need.o2
@@ -33,6 +38,12 @@ type WasteBlob struct {
 	co2      int
 	toxins   int
 	antigens []Protein
+}
+
+type WasteBlobData struct {
+	CO2      int
+	Toxins   int
+	Antigens []Protein
 }
 
 func (w *WasteBlob) Add(waste *WasteBlob) {

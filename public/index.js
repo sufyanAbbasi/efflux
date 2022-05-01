@@ -176,7 +176,7 @@ Node.makeNode = (origin, port, cy) => {
 
 function init() {
     const selector = document.querySelector('select');
-    selector.addEventListener('change', () => {
+    selector.addEventListener('input', () => {
         cy.fit(cy.$(selector.value));
     })
     const root = Node.makeNode(window.location.hostname, 8000);

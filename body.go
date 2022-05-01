@@ -14,13 +14,13 @@ const (
 )
 
 const (
-	status WorkType = iota
-	cover           // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	inhale          // Called on lung cells by blood cells.
-	exhale          // Called on blood cells by other cells.
-	pump            // Called on to heart cells to pump, by brain cels.
-	move            // Called on muscle cells by brain cells.
-	think           // Called on brain cells to perform a computation, by muscle cells.
+	diffusion WorkType = iota
+	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
+	inhale             // Called on lung cells by blood cells.
+	exhale             // Called on blood cells by other cells.
+	pump               // Called on to heart cells to pump, by brain cels.
+	move               // Called on muscle cells by brain cells.
+	think              // Called on brain cells to perform a computation, by muscle cells.
 )
 
 type Graph struct {
@@ -68,19 +68,19 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	counts := []int{
-		25, // Blood
-		10, // Brain
-		10, // Heart
-		50, // Lungs
-		3,  // Muscles
-		3,  // Skin
+		10, // Blood
+		4,  // Brain
+		5,  // Heart
+		10, // Lungs
+		1,  // Muscles
+		1,  // Skin
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
 				cell := MakeEukaryoticStemCell(b.dna, cellTypes[i], workTypes[i])
 				cell.parent = node
-				go cell.Start(ctx)
+				cell.Start(ctx)
 			}
 		}
 	}

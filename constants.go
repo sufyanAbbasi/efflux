@@ -4,6 +4,7 @@ import "time"
 
 const TIMEOUT_SEC = 1 * time.Second
 const CELL_CLOCK_RATE = 30 * time.Millisecond
+const DIFFUSION_SEC = 1 * time.Second
 
 const WORK_ENDPOINT = "/work"
 const STATUS_ENDPOINT = "/status"
