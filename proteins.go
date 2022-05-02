@@ -76,26 +76,59 @@ func DoWork(ctx context.Context, cell *EukaryoticCell) bool {
 
 func StemCellToSpecializedCell(ctx context.Context, cell *EukaryoticCell) bool {
 	if cell.hasTelomerase {
-		// Loses stem cell status after first mitosis.
+		// Loses stem cell status after first mitosis, which is free.
 		c := cell.Mitosis()
-		fmt.Println(c)
 		c.Start(ctx)
 	}
 	return true
 }
 
-func ShouldMitosis(ctx context.Context, cell *EukaryoticCell) bool {
-	// TODO: Check some conditions for cell reproduction.
-	if false {
-		c := cell.Mitosis()
-		c.Start(ctx)
+func ShouldMitosisAndRepair(ctx context.Context, cell *EukaryoticCell) bool {
+	// Not all cells can repair, but for the sake of this simulation, they can.
+	if cell.damage > 0 {
+		resource := cell.parent.materialPool.GetResource()
+		if resource.vitamins >= cell.damage {
+			cell.damage = 0
+			resource.vitamins -= cell.damage
+		} else {
+			cell.damage -= resource.vitamins
+			resource.vitamins = 0
+		}
+		cell.parent.materialPool.PutResource(resource)
+
+	}
+	// Also not all cells can reproduce, but for sake of simulation, they can.
+	// Three conditions for mitosis, to prevent runaway growth:
+	// - No damage on the cell
+	// - Enough growth ligand (signal)
+	// - Enough vitamin resources
+	if cell.damage == 0 {
+		ligand := cell.parent.materialPool.GetLigand()
+		if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
+			resource := cell.parent.materialPool.GetResource()
+			if resource.vitamins >= VITAMIN_COST_MITOSIS {
+				ligand.growth -= LIGAND_GROWTH_THRESHOLD
+				resource.vitamins -= VITAMIN_COST_MITOSIS
+				c := cell.Mitosis()
+				c.Start(ctx)
+			}
+			cell.parent.materialPool.PutResource(resource)
+		}
+		cell.parent.materialPool.PutLigand(ligand)
 	}
 	return true
 }
 
 func ShouldApoptosis(ctx context.Context, cell *EukaryoticCell) bool {
-	// TODO: Check some conditions for cell death.
-	if false {
+	waste := cell.parent.materialPool.GetWaste()
+	if waste.toxins >= TOXINS_THRESHOLD {
+		cell.damage++
+	}
+	if waste.co2 >= CO2_THRESHOLD {
+		cell.damage++
+	}
+	cell.parent.materialPool.PutWaste(waste)
+	if cell.killSignal || cell.damage > MAX_DAMAGE {
 		Apoptosis(ctx, cell)
 		return false
 	}
@@ -118,10 +151,10 @@ func Respirate(ctx context.Context, cell *EukaryoticCell) bool {
 		resource.o2 += 6
 		cell.parent.materialPool.PutResource(resource)
 		waste := cell.parent.materialPool.GetWaste()
-		if waste.co2 <= 6 {
-			waste.co2 = 0
-		} else {
+		if waste.co2 > 6 {
 			waste.co2 -= 6
+		} else {
+			waste.co2 = 0
 		}
 		cell.parent.materialPool.PutWaste(waste)
 	}
@@ -150,9 +183,16 @@ func Expirate(ctx context.Context, cell *EukaryoticCell) bool {
 }
 
 func MuscleFindFood(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.parent.RequestWork(Work{
+	request := cell.parent.RequestWork(Work{
 		workType: think,
 	})
+	if request.status == 200 {
+		// Successfully found a food unit.
+		cell.parent.RequestWork(Work{
+			workType: digest,
+		})
+	}
+
 	return true
 }
 
@@ -163,10 +203,17 @@ func MuscleSeekSkinProtection(ctx context.Context, cell *EukaryoticCell) bool {
 	return true
 }
 
-func BrainControlMuscles(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.parent.RequestWork(Work{
-		workType: move,
-	})
+func BrainStimulateMuscles(ctx context.Context, cell *EukaryoticCell) bool {
+	// Check resources in the brain. If not enough,
+	// stimulate muscle movements.
+	resource := cell.parent.materialPool.GetResource()
+	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD {
+		// If vitamin levels are low, move more.
+		cell.parent.RequestWork(Work{
+			workType: move,
+		})
+	}
+	cell.parent.materialPool.PutResource(resource)
 	return true
 }
 
@@ -177,16 +224,44 @@ func BrainRequestPump(ctx context.Context, cell *EukaryoticCell) bool {
 	return true
 }
 
+func Digest(ctx context.Context, cell *EukaryoticCell) bool {
+	// TODO: Make this process linked to gut bacteria.
+	localResource := cell.parent.materialPool.GetLocalResource()
+	if localResource.glucose > 0 {
+		// Convert glucose to vitamins.
+		resource := cell.parent.materialPool.GetResource()
+		resource.vitamins += localResource.glucose
+		cell.parent.materialPool.PutResource(resource)
+	}
+	cell.parent.materialPool.PutLocalResource(localResource)
+	return true
+}
+
+func GenerateRandomProteinPermutation(c *EukaryoticCell) (proteins []Protein) {
+	chooseN := len(proteins) / 3
+	permutations := rand.Perm(chooseN)
+	var allProteins []Protein
+	for protein := range c.dna.selfProteins {
+		allProteins = append(allProteins, protein)
+	}
+	for i := 0; i < chooseN; i++ {
+		proteins = append(proteins, allProteins[permutations[i]])
+	}
+	return
+}
+
 func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
-				action: StemCellToSpecializedCell,
+				action:   StemCellToSpecializedCell,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 			next: &StateNode{
 				next: nil,
 				function: &ProteinFunction{
-					action: DoWork,
+					action:   DoWork,
+					proteins: GenerateRandomProteinPermutation(c),
 				},
 			},
 		},
@@ -198,7 +273,8 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: Expirate,
+				action:   Expirate,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
@@ -206,58 +282,82 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: BrainRequestPump,
+				action:   BrainRequestPump,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: Respirate,
+				action:   Respirate,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: BrainControlMuscles,
+				action:   BrainStimulateMuscles,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: Respirate,
+				action:   Respirate,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
+	case Enterocyte:
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action:   Digest,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+		currNode.next = &StateNode{
+			next: nil,
+			function: &ProteinFunction{
+				action:   Respirate,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	case Pneumocyte:
+		fallthrough
 	case Keratinocyte:
-		// Do nothing.
+		// Do nothing but work.
 	case Myocyte:
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: MuscleFindFood,
+				action:   MuscleFindFood,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: MuscleSeekSkinProtection,
+				action:   MuscleSeekSkinProtection,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
 		fallthrough
 	case Cardiomyocyte:
 		fallthrough
-	case Pneumocyte:
-		fallthrough
 	default:
 		currNode.next = &StateNode{
 			next: nil,
 			function: &ProteinFunction{
-				action: Respirate,
+				action:   Respirate,
+				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
 		currNode = currNode.next
@@ -265,14 +365,16 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 	currNode.next = &StateNode{
 		next: nil,
 		function: &ProteinFunction{
-			action: ShouldMitosis,
+			action:   ShouldMitosisAndRepair,
+			proteins: GenerateRandomProteinPermutation(c),
 		},
 	}
 	currNode = currNode.next
 	currNode.next = &StateNode{
 		next: s.root.next, // Do Work
 		function: &ProteinFunction{
-			action: ShouldApoptosis,
+			action:   ShouldApoptosis,
+			proteins: GenerateRandomProteinPermutation(c),
 		},
 	}
 	return s

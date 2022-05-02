@@ -18,6 +18,7 @@ type DNA struct {
 	name         string
 	base         *ecdsa.PrivateKey
 	dnaType      DNAType
+	selfProteins map[Protein]bool
 	makeFunction func(c *EukaryoticCell) *StateDiagram
 }
 type MHC_I *ecdsa.PublicKey
@@ -40,6 +41,7 @@ func MakeDNA(dnaType DNAType, name string) *DNA {
 		base:    privateKey,
 		dnaType: dnaType,
 	}
+	dna.selfProteins = dna.GenerateSelfProteins()
 	switch dnaType {
 	case HUMAN_DNA:
 		dna.makeFunction = MakeStateDiagramByCell

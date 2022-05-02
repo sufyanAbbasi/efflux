@@ -108,8 +108,8 @@ class Node {
             const makePadding = (str) => String(str).padStart(5).padEnd(10);
             labels.push(`${makePadding('Work')}|${makePadding('Requests')}|${makePadding('Successes')}|${makePadding('Failures')}|${makePadding('Completed')}`);
             labels.push(''.padStart(55, '-'));
-            for (const {workType, requestCount, successCount, failureCount, completedCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
-                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(successCount)}|${makePadding(failureCount)}|${makePadding(completedCount)}`);
+            for (const {workType, requestCount, successCount, failureCount, completedCount, completedFailureCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
+                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(successCount)}|${makePadding(failureCount)}|${makePadding(`${completedCount} (${completedFailureCount})`)}`);
             }
         }
 

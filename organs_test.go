@@ -17,6 +17,7 @@ func TestSelfNodeInteraction(t *testing.T) {
 	}
 	ctx := context.Background()
 	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1.materialPool = nil
 	ConnectNodes(ctx, node1, node1)
 
 	testWorker1 := &TestWorker{
@@ -50,7 +51,9 @@ func TestTwoNodeInteraction(t *testing.T) {
 	}
 	ctx := context.Background()
 	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1.materialPool = nil
 	node2 := InitializeNewNode(ctx, testGraph, "node2")
+	node2.materialPool = nil
 	ConnectNodes(ctx, node1, node2)
 
 	testWorker1 := &TestWorker{
@@ -110,8 +113,11 @@ func TestThreeNodeInteraction(t *testing.T) {
 	}
 	ctx := context.Background()
 	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1.materialPool = nil
 	node2 := InitializeNewNode(ctx, testGraph, "node2")
+	node2.materialPool = nil
 	node3 := InitializeNewNode(ctx, testGraph, "node3")
+	node3.materialPool = nil
 	ConnectNodes(ctx, node1, node2)
 	ConnectNodes(ctx, node1, node3)
 

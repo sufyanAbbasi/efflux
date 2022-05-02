@@ -13,16 +13,6 @@ const (
 	neurons                     // Connected via neurons.
 )
 
-const (
-	diffusion WorkType = iota
-	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	inhale             // Called on lung cells by blood cells.
-	exhale             // Called on blood cells by other cells.
-	pump               // Called on to heart cells to pump, by brain cels.
-	move               // Called on muscle cells by brain cells.
-	think              // Called on brain cells to perform a computation, by muscle cells.
-)
-
 type Graph struct {
 	allNodes map[string]*Node
 }
@@ -33,6 +23,7 @@ type Body struct {
 	bloodNodes  []*Node
 	boneNodes   []*Node
 	brainNodes  []*Node
+	gutNodes    []*Node
 	heartNodes  []*Node
 	lymphNodes  []*Node
 	lungNodes   []*Node
@@ -41,39 +32,43 @@ type Body struct {
 }
 
 func (b *Body) GenerateCellsAndStart(ctx context.Context) {
-	nodeTypes := [][]*Node{
+	nodeTypes := [7][]*Node{
 		b.bloodNodes,
 		b.brainNodes,
 		b.heartNodes,
 		b.lungNodes,
 		b.muscleNodes,
 		b.skinNodes,
+		b.gutNodes,
 	}
-	cellTypes := []CellType{
+	cellTypes := [7]CellType{
 		RedBlood,
 		Neuron,
 		Cardiomyocyte,
 		Pneumocyte,
 		Myocyte,
 		Keratinocyte,
+		Enterocyte,
 	}
 
-	workTypes := []WorkType{
+	workTypes := [7]WorkType{
 		inhale, // Blood
 		think,  // Brain
 		pump,   // Heart
 		exhale, // Lungs
 		move,   // Muscles
 		cover,  // Skin
+		digest, // Gut
 	}
 
-	counts := []int{
-		10, // Blood
-		4,  // Brain
-		5,  // Heart
-		10, // Lungs
-		1,  // Muscles
-		1,  // Skin
+	counts := [7]int{
+		1, // Blood
+		1, // Brain
+		1, // Heart
+		1, // Lungs
+		1, // Muscles
+		1, // Skin
+		1, // Gut
 	}
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
@@ -250,6 +245,16 @@ func GenerateBody(ctx context.Context) *Body {
 		boneLeftLeg,
 		boneRightLeg,
 	)
+
+	// Gut
+	gut := InitializeNewNode(ctx, b.Graph, "Gut")
+	ConnectNodes(ctx, gut, bloodTorso)
+	ConnectNodes(ctx, gut, lymphTorso)
+	ConnectNodes(ctx, gut, muscleLeftArm)
+	ConnectNodes(ctx, gut, muscleRightArm)
+	ConnectNodes(ctx, gut, muscleLeftLeg)
+	ConnectNodes(ctx, gut, muscleRightLeg)
+	b.gutNodes = append(b.gutNodes, gut)
 
 	b.GenerateCellsAndStart(ctx)
 	return b

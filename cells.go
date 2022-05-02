@@ -12,7 +12,8 @@ import (
 type CellType int
 
 const (
-	Bacterial CellType = iota
+	Bacterial   CellType = iota
+	GutBacteria          // Bacteria that synthesize vitamins in the gut.
 	Viral
 	RedBlood
 	Neuron
@@ -20,12 +21,19 @@ const (
 	Pneumocyte    // Pulmonary Cell
 	Myocyte       // Muscle Cell
 	Keratinocyte  // Skin Cell
+	Enterocyte    // Gut Lining Cell
 	TLymphocyte   // T Cell
 	Dendritic     // Dendritic Cells
 )
 
 func (c CellType) String() string {
 	switch c {
+	case Bacterial:
+		return "Bacterial"
+	case GutBacteria:
+		return "GutBacteria"
+	case Viral:
+		return "Viral"
 	case RedBlood:
 		return "RedBlood"
 	case Neuron:
@@ -38,6 +46,8 @@ func (c CellType) String() string {
 		return "Myocyte"
 	case Keratinocyte:
 		return "Keratinocyte"
+	case Enterocyte:
+		return "Enterocyte"
 	case TLymphocyte:
 		return "TLymphocyte"
 	case Dendritic:
@@ -55,6 +65,7 @@ type Cell struct {
 	workType     WorkType
 	parent       *Node
 	resourceNeed *ResourceBlob
+	damage       int
 }
 
 func (c *Cell) SetParent(node *Node) {
@@ -85,12 +96,18 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		waste.co2 += 6
 		c.parent.materialPool.PutWaste(waste)
 		resource := c.parent.materialPool.GetResource()
-		if resource.o2 >= 6 {
+		if resource.o2 <= 6 {
 			resource.o2 = 0
 		} else {
 			resource.o2 -= 6
 		}
 		c.parent.materialPool.PutResource(resource)
+		request.status = 200
+		request.result = "Completed."
+	case Enterocyte:
+		resource := c.parent.materialPool.GetLocalResource()
+		resource.glucose += 6
+		c.parent.materialPool.PutLocalResource(resource)
 		request.status = 200
 		request.result = "Completed."
 	case Pneumocyte:
@@ -128,6 +145,8 @@ func (c *Cell) PresentAntigen() *Antigen {
 
 func (c *Cell) ResetResourceNeed() {
 	switch c.cellType {
+	case Pneumocyte:
+		fallthrough
 	case Keratinocyte:
 		fallthrough
 	case RedBlood:
@@ -135,8 +154,6 @@ func (c *Cell) ResetResourceNeed() {
 			o2: 0,
 		}
 	case Neuron:
-		fallthrough
-	case Pneumocyte:
 		fallthrough
 	case Cardiomyocyte:
 		fallthrough
@@ -168,9 +185,26 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 }
 
 func (c *Cell) ProduceWaste() {
-	waste := c.parent.materialPool.GetWaste()
-	waste.co2 += 6
-	c.parent.materialPool.PutWaste(waste)
+	if c.parent.materialPool != nil {
+		switch c.cellType {
+		case Pneumocyte:
+			fallthrough
+		case Keratinocyte:
+			fallthrough
+		case RedBlood:
+			// No waste produced.
+		case Neuron:
+			fallthrough
+		case Cardiomyocyte:
+			fallthrough
+		case Myocyte:
+			fallthrough
+		default:
+			waste := c.parent.materialPool.GetWaste()
+			waste.co2 += 6
+			c.parent.materialPool.PutWaste(waste)
+		}
+	}
 }
 
 func (c *Cell) DNA() *DNA {
@@ -181,12 +215,20 @@ type EukaryoticCell struct {
 	*Cell
 	telomereLength int
 	hasTelomerase  bool
+	killSignal     bool
 	function       *StateDiagram
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
 	e.function = e.dna.makeFunction(e)
 	go e.function.Run(ctx, e)
+}
+
+func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
+	if e.function == nil {
+		return
+	}
+	return e.function.current.function.proteins
 }
 
 func (e *EukaryoticCell) Mitosis() *EukaryoticCell {
@@ -202,6 +244,7 @@ func (e *EukaryoticCell) Mitosis() *EukaryoticCell {
 	if e.parent != nil {
 		e.parent.AddWorker(cell)
 	}
+	fmt.Println("Spawned:", cell, "in", cell.parent)
 	return cell
 }
 
@@ -222,6 +265,7 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 		},
 		telomereLength: 100,
 		hasTelomerase:  true,
+		killSignal:     false,
 	}
 }
 
@@ -302,9 +346,8 @@ func MakeTCell(dna *DNA, proteinReceptor Protein) *TCell {
 }
 
 func GenerateTCells(dna *DNA) (tCells []*TCell) {
-	selfProteins := dna.GenerateSelfProteins()
 	for i := 0; i < 65535; i++ {
-		_, isSelf := selfProteins[Protein(i)]
+		_, isSelf := dna.selfProteins[Protein(i)]
 		if !isSelf {
 			tCells = append(tCells, MakeTCell(dna, Protein(i)))
 		}
