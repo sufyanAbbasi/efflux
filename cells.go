@@ -368,7 +368,7 @@ func (p *ProkaryoticCell) Apoptosis() {
 }
 
 func (p *ProkaryoticCell) ShouldMitosis() bool {
-	if time.Now().After(p.lastGenerationTime.Add(p.generationTime)) && p.energy > BACTERIA_ENERGY_MITOSIS_THRESHOLD {
+	if time.Now().After(p.lastGenerationTime.Add(p.generationTime)) && p.energy >= BACTERIA_ENERGY_MITOSIS_THRESHOLD {
 		p.energy = 0
 		return true
 	}

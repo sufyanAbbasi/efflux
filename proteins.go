@@ -401,13 +401,17 @@ func BacteriaShouldMitosis(ctx context.Context, cell CellActor) bool {
 	// Bacteria will not be allowed to repair itself.
 	// Three conditions for bacteria mitosis, may allow runaway growth:
 	// - Enough internal energy (successful calls to Oxygenate)
-	// - Enough glucose
+	// - Enough vitamin or glucose resources (not picky)
 	// - Enough time has passed
 	if cell.ShouldMitosis() {
 		resource := cell.Parent().materialPool.GetResource()
 		defer cell.Parent().materialPool.PutResource(resource)
 		if resource.glucose >= GLUCOSE_COST_MITOSIS {
 			resource.glucose -= GLUCOSE_COST_MITOSIS
+			c := cell.Mitosis()
+			c.Start(ctx)
+		} else if resource.vitamins >= VITAMIN_COST_MITOSIS {
+			resource.vitamins -= VITAMIN_COST_MITOSIS
 			c := cell.Mitosis()
 			c.Start(ctx)
 		}
