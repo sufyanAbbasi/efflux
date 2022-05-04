@@ -7,13 +7,14 @@ import (
 	"math/rand"
 	"reflect"
 	"sync"
+	"time"
 )
 
 type CellType int
 
 const (
-	Bacterial   CellType = iota
-	GutBacteria          // Bacteria that synthesize vitamins in the gut.
+	Bacterial    CellType = iota
+	Bacteroidota          // Bacteria that synthesize vitamins in the gut.
 	Viral
 	RedBlood
 	Neuron
@@ -30,8 +31,8 @@ func (c CellType) String() string {
 	switch c {
 	case Bacterial:
 		return "Bacterial"
-	case GutBacteria:
-		return "GutBacteria"
+	case Bacteroidota:
+		return "Bacteroidota"
 	case Viral:
 		return "Viral"
 	case RedBlood:
@@ -66,18 +67,57 @@ type Cell struct {
 	parent       *Node
 	resourceNeed *ResourceBlob
 	damage       int
+	function     *StateDiagram
+	oxygenated   bool
+}
+
+func (c *Cell) String() string {
+	return fmt.Sprintf("%v (%v)", c.cellType, c.dna.name)
+}
+
+func (c *Cell) Parent() *Node {
+	return c.parent
 }
 
 func (c *Cell) SetParent(node *Node) {
 	c.parent = node
 }
 
-func (c *Cell) GetWorkType() WorkType {
+func (c *Cell) DNA() *DNA {
+	return c.dna
+}
+
+func (c *Cell) CellType() CellType {
+	return c.cellType
+}
+
+func (c *Cell) WorkType() WorkType {
 	return c.workType
 }
 
-func (c *Cell) String() string {
-	return fmt.Sprintf("%v (%v)", c.cellType, c.dna.name)
+func (c *Cell) IsOxygenated() bool {
+	return c.oxygenated
+}
+
+func (c *Cell) Oxygenate(oxygenate bool) {
+	c.oxygenated = oxygenate
+}
+
+func (c *Cell) Damage() int {
+	return c.damage
+}
+func (c *Cell) Repair(damage int) {
+	if c.damage <= damage {
+		c.damage = 0
+	} else {
+		c.damage -= damage
+	}
+	fmt.Println("Repaired:", c)
+}
+
+func (c *Cell) IncurDamage(damage int) {
+	c.damage += damage
+	fmt.Println("Damaged:", c)
 }
 
 func (c *Cell) Work(ctx context.Context, request Work) Work {
@@ -105,9 +145,9 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		request.status = 200
 		request.result = "Completed."
 	case Enterocyte:
-		resource := c.parent.materialPool.GetLocalResource()
+		resource := c.parent.materialPool.GetResource()
 		resource.glucose += 6
-		c.parent.materialPool.PutLocalResource(resource)
+		c.parent.materialPool.PutResource(resource)
 		request.status = 200
 		request.result = "Completed."
 	case Pneumocyte:
@@ -176,8 +216,8 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 			return false
 		default:
 			resource := c.parent.materialPool.GetResource()
+			defer c.parent.materialPool.PutResource(resource)
 			resource.Consume(c.resourceNeed)
-			c.parent.materialPool.PutResource(resource)
 		}
 	}
 	c.ResetResourceNeed()
@@ -207,16 +247,10 @@ func (c *Cell) ProduceWaste() {
 	}
 }
 
-func (c *Cell) DNA() *DNA {
-	return c.dna
-}
-
 type EukaryoticCell struct {
 	*Cell
 	telomereLength int
 	hasTelomerase  bool
-	killSignal     bool
-	function       *StateDiagram
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
@@ -231,7 +265,11 @@ func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
 	return e.function.current.function.proteins
 }
 
-func (e *EukaryoticCell) Mitosis() *EukaryoticCell {
+func (e *EukaryoticCell) HasTelomerase() bool {
+	return e.hasTelomerase
+}
+
+func (e *EukaryoticCell) Mitosis() CellActor {
 	if e.telomereLength <= 0 {
 		return nil
 	}
@@ -245,14 +283,35 @@ func (e *EukaryoticCell) Mitosis() *EukaryoticCell {
 		e.parent.AddWorker(cell)
 	}
 	fmt.Println("Spawned:", cell, "in", cell.parent)
-	return cell
+	return CellActor(cell)
 }
 
 func (e *EukaryoticCell) Apoptosis() {
 	if e.parent != nil {
 		e.parent.RemoveWorker(e)
 	}
+	e.parent = nil
 	// TODO: make sure this gets garbage collected.
+}
+
+func (e *EukaryoticCell) ShouldMitosis() bool {
+	ligand := e.Parent().materialPool.GetLigand()
+	defer e.Parent().materialPool.PutLigand(ligand)
+	if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
+		ligand.growth -= LIGAND_GROWTH_THRESHOLD
+		return true
+	}
+	return false
+}
+
+func (e *EukaryoticCell) IsAerobic() bool {
+	switch e.cellType {
+	case Pneumocyte:
+		fallthrough
+	case Keratinocyte:
+		return false
+	}
+	return true
 }
 
 func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *EukaryoticCell {
@@ -265,26 +324,78 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 		},
 		telomereLength: 100,
 		hasTelomerase:  true,
-		killSignal:     false,
 	}
 }
 
 type ProkaryoticCell struct {
 	Cell
-}
-
-func (p *ProkaryoticCell) Mitosis() *ProkaryoticCell {
-	return MakeProkaryoticCell(p.dna, p.cellType)
+	generationTime     time.Duration
+	lastGenerationTime time.Time
+	energy             int
 }
 
 func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
+	var generationTime time.Duration
+	switch cellType {
+	case Bacteroidota:
+		generationTime = GUT_BACTERIA_GENERATION_DURATION
+	default:
+		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
+	}
 	return &ProkaryoticCell{
 		Cell: Cell{
 			cellType: cellType,
 			dna:      dna,
 			mhc_i:    dna.MHC_I(),
 		},
+		generationTime:     generationTime,
+		lastGenerationTime: time.Now(),
 	}
+}
+
+func (p *ProkaryoticCell) Start(ctx context.Context) {
+	p.function = p.dna.makeFunction(p)
+	go p.function.Run(ctx, p)
+}
+
+func (p *ProkaryoticCell) HasTelomerase() bool {
+	return false
+}
+
+func (p *ProkaryoticCell) Apoptosis() {
+	p.parent = nil
+	// TODO: make sure this gets garbage collected.
+}
+
+func (p *ProkaryoticCell) ShouldMitosis() bool {
+	if time.Now().After(p.lastGenerationTime.Add(p.generationTime)) && p.energy > BACTERIA_ENERGY_MITOSIS_THRESHOLD {
+		p.energy = 0
+		return true
+	}
+	return false
+}
+
+func (p *ProkaryoticCell) Mitosis() CellActor {
+	p.lastGenerationTime = time.Now()
+	cell := MakeProkaryoticCell(p.dna, p.cellType)
+	cell.parent = p.parent
+	fmt.Println("Spawned:", cell, "in", cell.parent)
+	return CellActor(cell)
+}
+
+func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {
+	p.Cell.Oxygenate(oxygenate)
+	if !oxygenate {
+		p.energy++
+	}
+}
+
+func (p *ProkaryoticCell) IsAerobic() bool {
+	switch p.cellType {
+	case Bacteroidota:
+		return true
+	}
+	return false
 }
 
 type Virus struct {

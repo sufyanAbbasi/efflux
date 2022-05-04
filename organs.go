@@ -50,7 +50,7 @@ func (w WorkType) String() string {
 }
 
 type Worker interface {
-	GetWorkType() WorkType
+	WorkType() WorkType
 	SetParent(parent *Node)
 	Work(ctx context.Context, request Work) Work
 }
@@ -119,7 +119,7 @@ func ReceiveWork(connection *websocket.Conn) (request Work) {
 	return
 }
 
-type Manager struct {
+type WorkManager struct {
 	sync.RWMutex
 	nextAvailableWorker   chan Worker
 	resultChan            chan Work
@@ -138,7 +138,7 @@ type Node struct {
 	origin       string
 	port         string
 	websocketUrl string
-	managers     map[WorkType]*Manager
+	managers     map[WorkType]*WorkManager
 	materialPool *MaterialPool
 }
 
@@ -159,7 +159,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 		origin:       origin,
 		port:         port,
 		websocketUrl: websocketUrl,
-		managers:     make(map[WorkType]*Manager),
+		managers:     make(map[WorkType]*WorkManager),
 	}
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
@@ -216,7 +216,7 @@ func ConnectNodes(ctx context.Context, node1, node2 *Node) {
 
 func (n *Node) MakeAvailable(worker Worker) {
 	go func(worker Worker) {
-		manager, ok := n.managers[worker.GetWorkType()]
+		manager, ok := n.managers[worker.WorkType()]
 		if ok {
 			if manager.nextAvailableWorker == nil {
 				manager.nextAvailableWorker = make(chan Worker)
@@ -229,17 +229,17 @@ func (n *Node) MakeAvailable(worker Worker) {
 func (n *Node) AddWorker(worker Worker) {
 	n.Lock()
 	defer n.Unlock()
-	manager, ok := n.managers[worker.GetWorkType()]
+	manager, ok := n.managers[worker.WorkType()]
 	if ok {
 		if manager.nextAvailableWorker == nil {
 			manager.nextAvailableWorker = make(chan Worker)
 		}
 	} else {
-		manager := &Manager{
+		manager := &WorkManager{
 			nextAvailableWorker: make(chan Worker),
 			resultChan:          make(chan Work, RESULT_BUFFER_SIZE),
 		}
-		n.managers[worker.GetWorkType()] = manager
+		n.managers[worker.WorkType()] = manager
 	}
 	worker.SetParent(n)
 }
@@ -299,20 +299,20 @@ func (n *Node) ProcessDiffusionRequest(request Work) {
 	json.Unmarshal([]byte(request.result), data)
 
 	resource := n.materialPool.GetResource()
+	defer n.materialPool.PutResource(resource)
 	resource.Add(&ResourceBlob{
 		o2:       data.Resources.O2,
 		glucose:  data.Resources.Glucose,
 		vitamins: data.Resources.Vitamins,
 	})
-	n.materialPool.PutResource(resource)
 
 	waste := n.materialPool.GetWaste()
+	defer n.materialPool.PutWaste(waste)
 	waste.Add(&WasteBlob{
 		co2:      data.Waste.CO2,
 		toxins:   data.Waste.Toxins,
 		antigens: data.Waste.Antigens,
 	})
-	n.materialPool.PutWaste(waste)
 }
 
 func (n *Node) GetNodeStatus(connection *websocket.Conn) {
@@ -361,7 +361,7 @@ func (n *Node) RequestWork(request Work) (result Work) {
 	// First try to get a result without sending:
 	manager, ok := n.managers[request.workType]
 	if !ok {
-		manager = &Manager{
+		manager = &WorkManager{
 			// Skip nextAvailableWorker, to indicate that we can't process
 			// requests of this type.
 			resultChan: make(chan Work, RESULT_BUFFER_SIZE),

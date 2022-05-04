@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 )
 
 type EdgeType int // Determines how Nodes are connected.
@@ -19,7 +20,6 @@ type Graph struct {
 
 type Body struct {
 	*Graph
-	dna         *DNA
 	bloodNodes  []*Node
 	boneNodes   []*Node
 	brainNodes  []*Node
@@ -32,7 +32,9 @@ type Body struct {
 }
 
 func (b *Body) GenerateCellsAndStart(ctx context.Context) {
-	nodeTypes := [7][]*Node{
+
+	// Generate Eukaryotic Cells
+	nodeTypes := [][]*Node{
 		b.bloodNodes,
 		b.brainNodes,
 		b.heartNodes,
@@ -41,7 +43,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		b.skinNodes,
 		b.gutNodes,
 	}
-	cellTypes := [7]CellType{
+	cellTypes := []CellType{
 		RedBlood,
 		Neuron,
 		Cardiomyocyte,
@@ -51,7 +53,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Enterocyte,
 	}
 
-	workTypes := [7]WorkType{
+	workTypes := []WorkType{
 		inhale, // Blood
 		think,  // Brain
 		pump,   // Heart
@@ -61,7 +63,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		digest, // Gut
 	}
 
-	counts := [7]int{
+	counts := []int{
 		1, // Blood
 		1, // Brain
 		1, // Heart
@@ -70,15 +72,42 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		1, // Skin
 		1, // Gut
 	}
+	humanDNA := MakeDNA(HUMAN_DNA, HUMAN_NAME)
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
-				cell := MakeEukaryoticStemCell(b.dna, cellTypes[i], workTypes[i])
+				cell := MakeEukaryoticStemCell(humanDNA, cellTypes[i], workTypes[i])
 				cell.parent = node
+				fmt.Println("Initialized:", cell, "in", cell.parent)
 				cell.Start(ctx)
 			}
 		}
 	}
+	// Generate Prokaryotic Cells
+	nodeTypes = [][]*Node{
+		b.gutNodes,
+	}
+	cellTypes = []CellType{
+		Bacteroidota,
+	}
+
+	counts = []int{
+		1, // Gut
+	}
+
+	for i, nodes := range nodeTypes {
+		for _, node := range nodes {
+			cellType := cellTypes[i]
+			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
+			for j := 0; j < counts[i]; j++ {
+				cell := MakeProkaryoticCell(bacteriaDNA, cellType)
+				cell.parent = node
+				fmt.Println("Initialized:", cell, "in", cell.parent)
+				cell.Start(ctx)
+			}
+		}
+	}
+
 }
 
 func GenerateBody(ctx context.Context) *Body {
@@ -86,7 +115,6 @@ func GenerateBody(ctx context.Context) *Body {
 		Graph: &Graph{
 			allNodes: make(map[string]*Node),
 		},
-		dna: MakeDNA(HUMAN_DNA, HUMAN_NAME),
 	}
 	// Organs
 	brain := InitializeNewNode(ctx, b.Graph, "Brain")

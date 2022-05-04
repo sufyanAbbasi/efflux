@@ -12,7 +12,7 @@ type StateDiagram struct {
 	current *StateNode
 }
 
-func (s *StateDiagram) Run(ctx context.Context, cell *EukaryoticCell) {
+func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 	// Add a random delay to offset cells.
 	time.Sleep(time.Duration(rand.Float32()*100) * time.Millisecond)
 	ctx, cancel := context.WithCancel(ctx)
@@ -42,40 +42,61 @@ func (s *StateDiagram) Run(ctx context.Context, cell *EukaryoticCell) {
 	}
 }
 
+type CellActor interface {
+	Worker
+	CellType() CellType
+	DNA() *DNA
+	Start(context.Context)
+	Parent() *Node
+	HasTelomerase() bool
+	ShouldMitosis() bool
+	Mitosis() CellActor
+	Damage() int
+	Repair(int)
+	IncurDamage(int)
+	Apoptosis()
+	IsAerobic() bool
+	IsOxygenated() bool
+	Oxygenate(bool)
+}
+
 type StateNode struct {
 	next     *StateNode
 	function *ProteinFunction
 }
 
 // Return false if terminal
-type CellAction func(ctx context.Context, cell *EukaryoticCell) bool
+type CellAction func(ctx context.Context, cell CellActor) bool
 
 type ProteinFunction struct {
 	proteins []Protein
 	action   CellAction
 }
 
-func (p *ProteinFunction) Run(ctx context.Context, cell *EukaryoticCell) bool {
+func (p *ProteinFunction) Run(ctx context.Context, cell CellActor) bool {
 	return p.action(ctx, cell)
 }
 
 // General Actions
 
-func checkParentOrDie(ctx context.Context, cell *EukaryoticCell) bool {
-	if cell.parent == nil {
+func checkParentOrDie(ctx context.Context, cell CellActor) bool {
+	if cell.Parent() == nil {
 		fmt.Printf("Force killed: %v\n", cell)
 		return Apoptosis(ctx, cell)
 	}
 	return true
 }
 
-func DoWork(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.parent.MakeAvailable(cell)
+func DoWork(ctx context.Context, cell CellActor) bool {
+	if !cell.IsAerobic() || cell.IsOxygenated() {
+		cell.Parent().MakeAvailable(cell)
+		cell.Oxygenate(false)
+	}
 	return true
 }
 
-func StemCellToSpecializedCell(ctx context.Context, cell *EukaryoticCell) bool {
-	if cell.hasTelomerase {
+func StemCellToSpecializedCell(ctx context.Context, cell CellActor) bool {
+	if cell.HasTelomerase() {
 		// Loses stem cell status after first mitosis, which is free.
 		c := cell.Mitosis()
 		c.Start(ctx)
@@ -83,112 +104,106 @@ func StemCellToSpecializedCell(ctx context.Context, cell *EukaryoticCell) bool {
 	return true
 }
 
-func ShouldMitosisAndRepair(ctx context.Context, cell *EukaryoticCell) bool {
+func ShouldMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	// Not all cells can repair, but for the sake of this simulation, they can.
-	if cell.damage > 0 {
-		resource := cell.parent.materialPool.GetResource()
-		if resource.vitamins >= cell.damage {
-			cell.damage = 0
-			resource.vitamins -= cell.damage
+	resource := cell.Parent().materialPool.GetResource()
+	defer cell.Parent().materialPool.PutResource(resource)
+	if cell.Damage() > 0 {
+		repair := resource.vitamins
+		if resource.vitamins >= cell.Damage() {
+			resource.vitamins -= cell.Damage()
 		} else {
-			cell.damage -= resource.vitamins
 			resource.vitamins = 0
 		}
-		cell.parent.materialPool.PutResource(resource)
-
+		cell.Repair(repair)
 	}
 	// Also not all cells can reproduce, but for sake of simulation, they can.
 	// Three conditions for mitosis, to prevent runaway growth:
 	// - No damage on the cell
 	// - Enough growth ligand (signal)
 	// - Enough vitamin resources
-	if cell.damage == 0 {
-		ligand := cell.parent.materialPool.GetLigand()
-		if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
-			resource := cell.parent.materialPool.GetResource()
-			if resource.vitamins >= VITAMIN_COST_MITOSIS {
-				ligand.growth -= LIGAND_GROWTH_THRESHOLD
-				resource.vitamins -= VITAMIN_COST_MITOSIS
-				c := cell.Mitosis()
-				c.Start(ctx)
-			}
-			cell.parent.materialPool.PutResource(resource)
+	if cell.Damage() <= DAMAGE_MITOSIS_THRESHOLD && cell.ShouldMitosis() {
+		if resource.vitamins >= VITAMIN_COST_MITOSIS {
+			resource.vitamins -= VITAMIN_COST_MITOSIS
+			c := cell.Mitosis()
+			c.Start(ctx)
 		}
-		cell.parent.materialPool.PutLigand(ligand)
 	}
 	return true
 }
 
-func ShouldApoptosis(ctx context.Context, cell *EukaryoticCell) bool {
-	waste := cell.parent.materialPool.GetWaste()
+func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
+	waste := cell.Parent().materialPool.GetWaste()
+	defer cell.Parent().materialPool.PutWaste(waste)
 	if waste.toxins >= TOXINS_THRESHOLD {
-		cell.damage++
+		cell.IncurDamage(1)
 	}
 	if waste.co2 >= CO2_THRESHOLD {
-		cell.damage++
+		cell.IncurDamage(1)
 	}
-	cell.parent.materialPool.PutWaste(waste)
-	if cell.killSignal || cell.damage > MAX_DAMAGE {
+	if cell.Damage() > MAX_DAMAGE {
 		Apoptosis(ctx, cell)
 		return false
 	}
 	return true
 }
 
-func Apoptosis(ctx context.Context, cell *EukaryoticCell) bool {
+func Apoptosis(ctx context.Context, cell CellActor) bool {
 	fmt.Println(cell, " Died!")
 	cell.Apoptosis()
 	return false
 }
 
-func Respirate(ctx context.Context, cell *EukaryoticCell) bool {
+func Respirate(ctx context.Context, cell CellActor) bool {
 	// Receive a unit of 02 for a unit of CO2
-	request := cell.parent.RequestWork(Work{
+	request := cell.Parent().RequestWork(Work{
 		workType: inhale,
 	})
 	if request.status == 200 {
-		resource := cell.parent.materialPool.GetResource()
+		resource := cell.Parent().materialPool.GetResource()
+		defer cell.Parent().materialPool.PutResource(resource)
 		resource.o2 += 6
-		cell.parent.materialPool.PutResource(resource)
-		waste := cell.parent.materialPool.GetWaste()
+		waste := cell.Parent().materialPool.GetWaste()
+		defer cell.Parent().materialPool.PutWaste(waste)
 		if waste.co2 > 6 {
 			waste.co2 -= 6
 		} else {
 			waste.co2 = 0
 		}
-		cell.parent.materialPool.PutWaste(waste)
+		cell.Oxygenate(true)
 	}
 	return true
 }
 
-func Expirate(ctx context.Context, cell *EukaryoticCell) bool {
+func Expirate(ctx context.Context, cell CellActor) bool {
 	// Exchange a unit of C02 for a unit of O2
-	request := cell.parent.RequestWork(Work{
+	request := cell.Parent().RequestWork(Work{
 		workType: exhale,
 	})
 	if request.status == 200 {
-		waste := cell.parent.materialPool.GetWaste()
+		waste := cell.Parent().materialPool.GetWaste()
+		defer cell.Parent().materialPool.PutWaste(waste)
 		if waste.co2 <= 6 {
 			waste.co2 = 0
 		} else {
 			waste.co2 -= 6
 		}
-		cell.parent.materialPool.PutWaste(waste)
 
-		resource := cell.parent.materialPool.GetResource()
+		resource := cell.Parent().materialPool.GetResource()
+		defer cell.Parent().materialPool.PutResource(resource)
 		resource.o2 += 6
-		cell.parent.materialPool.PutResource(resource)
+		cell.Oxygenate(true)
 	}
 	return true
 }
 
-func MuscleFindFood(ctx context.Context, cell *EukaryoticCell) bool {
-	request := cell.parent.RequestWork(Work{
+func MuscleFindFood(ctx context.Context, cell CellActor) bool {
+	request := cell.Parent().RequestWork(Work{
 		workType: think,
 	})
 	if request.status == 200 {
 		// Successfully found a food unit.
-		cell.parent.RequestWork(Work{
+		cell.Parent().RequestWork(Work{
 			workType: digest,
 		})
 	}
@@ -196,52 +211,47 @@ func MuscleFindFood(ctx context.Context, cell *EukaryoticCell) bool {
 	return true
 }
 
-func MuscleSeekSkinProtection(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.parent.RequestWork(Work{
+func MuscleSeekSkinProtection(ctx context.Context, cell CellActor) bool {
+	cell.Parent().RequestWork(Work{
 		workType: cover,
 	})
 	return true
 }
 
-func BrainStimulateMuscles(ctx context.Context, cell *EukaryoticCell) bool {
+func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	// Check resources in the brain. If not enough,
 	// stimulate muscle movements.
-	resource := cell.parent.materialPool.GetResource()
+	resource := cell.Parent().materialPool.GetResource()
+	defer cell.Parent().materialPool.PutResource(resource)
 	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD {
 		// If vitamin levels are low, move more.
-		cell.parent.RequestWork(Work{
+		cell.Parent().RequestWork(Work{
 			workType: move,
 		})
 	}
-	cell.parent.materialPool.PutResource(resource)
 	return true
 }
 
-func BrainRequestPump(ctx context.Context, cell *EukaryoticCell) bool {
-	cell.parent.RequestWork(Work{
+func BrainRequestPump(ctx context.Context, cell CellActor) bool {
+	cell.Parent().RequestWork(Work{
 		workType: pump,
 	})
 	return true
 }
 
-func Digest(ctx context.Context, cell *EukaryoticCell) bool {
-	// TODO: Make this process linked to gut bacteria.
-	localResource := cell.parent.materialPool.GetLocalResource()
-	if localResource.glucose > 0 {
-		// Convert glucose to vitamins.
-		resource := cell.parent.materialPool.GetResource()
-		resource.vitamins += localResource.glucose
-		cell.parent.materialPool.PutResource(resource)
-	}
-	cell.parent.materialPool.PutLocalResource(localResource)
+func Flatulate(ctx context.Context, cell CellActor) bool {
+	// Manage CO2 levels by leaking it.
+	waste := cell.Parent().materialPool.GetWaste()
+	defer cell.Parent().materialPool.PutWaste(waste)
+	waste.co2 = 0
 	return true
 }
 
-func GenerateRandomProteinPermutation(c *EukaryoticCell) (proteins []Protein) {
+func GenerateRandomProteinPermutation(c CellActor) (proteins []Protein) {
 	chooseN := len(proteins) / 3
 	permutations := rand.Perm(chooseN)
 	var allProteins []Protein
-	for protein := range c.dna.selfProteins {
+	for protein := range c.DNA().selfProteins {
 		allProteins = append(allProteins, protein)
 	}
 	for i := 0; i < chooseN; i++ {
@@ -250,28 +260,26 @@ func GenerateRandomProteinPermutation(c *EukaryoticCell) (proteins []Protein) {
 	return
 }
 
-func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
+func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
 				action:   StemCellToSpecializedCell,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
-			next: &StateNode{
-				next: nil,
-				function: &ProteinFunction{
-					action:   DoWork,
-					proteins: GenerateRandomProteinPermutation(c),
-				},
-			},
 		},
-		current: nil,
 	}
-	currNode := s.root.next
-	switch c.cellType {
+	currNode := s.root
+	currNode.next = &StateNode{
+		function: &ProteinFunction{
+			action:   DoWork,
+			proteins: GenerateRandomProteinPermutation(c),
+		},
+	}
+	currNode = currNode.next
+	switch c.CellType() {
 	case RedBlood:
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   Expirate,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -280,7 +288,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode = currNode.next
 	case Neuron:
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   BrainRequestPump,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -288,7 +295,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   Respirate,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -296,7 +302,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   BrainStimulateMuscles,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -304,7 +309,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   Respirate,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -313,28 +317,27 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode = currNode.next
 	case Enterocyte:
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
-				action:   Digest,
+				action:   Flatulate,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
-		currNode = currNode.next
-		currNode.next = &StateNode{
-			next: nil,
-			function: &ProteinFunction{
-				action:   Respirate,
-				proteins: GenerateRandomProteinPermutation(c),
-			},
+		for i := 3; i > 0; i-- {
+			currNode = currNode.next
+			// Larger demand for oxygen to supply gut bacteria.
+			currNode.next = &StateNode{
+				function: &ProteinFunction{
+					action:   Respirate,
+					proteins: GenerateRandomProteinPermutation(c),
+				},
+			}
 		}
-		currNode = currNode.next
 	case Pneumocyte:
 		fallthrough
 	case Keratinocyte:
 		// Do nothing but work.
 	case Myocyte:
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   MuscleFindFood,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -342,7 +345,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   MuscleSeekSkinProtection,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -354,7 +356,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		fallthrough
 	default:
 		currNode.next = &StateNode{
-			next: nil,
 			function: &ProteinFunction{
 				action:   Respirate,
 				proteins: GenerateRandomProteinPermutation(c),
@@ -363,7 +364,6 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		currNode = currNode.next
 	}
 	currNode.next = &StateNode{
-		next: nil,
 		function: &ProteinFunction{
 			action:   ShouldMitosisAndRepair,
 			proteins: GenerateRandomProteinPermutation(c),
@@ -374,6 +374,122 @@ func MakeStateDiagramByCell(c *EukaryoticCell) *StateDiagram {
 		next: s.root.next, // Do Work
 		function: &ProteinFunction{
 			action:   ShouldApoptosis,
+			proteins: GenerateRandomProteinPermutation(c),
+		},
+	}
+	return s
+}
+
+// Bacteria Related CellActions
+
+func Digest(ctx context.Context, cell CellActor) bool {
+	if cell.IsAerobic() && cell.IsOxygenated() {
+		resource := cell.Parent().materialPool.GetResource()
+		defer cell.Parent().materialPool.PutResource(resource)
+		if resource.glucose > 0 {
+			// Convert glucose to vitamins.
+			resource := cell.Parent().materialPool.GetResource()
+			defer cell.Parent().materialPool.PutResource(resource)
+			resource.vitamins += resource.glucose
+		}
+		cell.Oxygenate(false)
+	}
+	return true
+}
+
+func BacteriaShouldMitosis(ctx context.Context, cell CellActor) bool {
+	// Bacteria will not be allowed to repair itself.
+	// Three conditions for bacteria mitosis, may allow runaway growth:
+	// - Enough internal energy (successful calls to Oxygenate)
+	// - Enough glucose
+	// - Enough time has passed
+	if cell.ShouldMitosis() {
+		resource := cell.Parent().materialPool.GetResource()
+		defer cell.Parent().materialPool.PutResource(resource)
+		if resource.glucose >= GLUCOSE_COST_MITOSIS {
+			resource.glucose -= GLUCOSE_COST_MITOSIS
+			c := cell.Mitosis()
+			c.Start(ctx)
+		}
+	}
+	return true
+}
+
+func BacteriaConsume(ctx context.Context, cell CellActor) bool {
+	if cell.IsAerobic() {
+		// Consume a unit of 02 for a unit of CO2
+		resource := cell.Parent().materialPool.GetResource()
+		defer cell.Parent().materialPool.PutResource(resource)
+		if resource.o2 > 6 {
+			resource.o2 -= 6
+			cell.Oxygenate(true)
+			waste := cell.Parent().materialPool.GetWaste()
+			defer cell.Parent().materialPool.PutWaste(waste)
+			if waste.co2 > 6 {
+				waste.co2 -= 6
+			} else {
+				waste.co2 = 0
+			}
+		}
+	} else {
+		waste := cell.Parent().materialPool.GetWaste()
+		defer cell.Parent().materialPool.PutWaste(waste)
+		if waste.co2 > 6 {
+			waste.co2 -= 6
+			waste.toxins += 1
+		}
+		cell.Oxygenate(true)
+	}
+	return true
+}
+
+func BacteriaShouldApoptosis(ctx context.Context, cell CellActor) bool {
+	waste := cell.Parent().materialPool.GetWaste()
+	defer cell.Parent().materialPool.PutWaste(waste)
+	if waste.toxins >= TOXINS_THRESHOLD {
+		cell.IncurDamage(1)
+	}
+	if waste.co2 >= CO2_THRESHOLD {
+		cell.IncurDamage(1)
+	}
+	if cell.Damage() > MAX_DAMAGE {
+		Apoptosis(ctx, cell)
+		return false
+	}
+	return true
+}
+
+func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
+	s := &StateDiagram{
+		root: &StateNode{
+			function: &ProteinFunction{
+				action:   BacteriaShouldMitosis,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		},
+	}
+	currNode := s.root
+	switch c.CellType() {
+	case Bacteroidota:
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   Digest,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
+	currNode.next = &StateNode{
+		function: &ProteinFunction{
+			action:   BacteriaConsume,
+			proteins: GenerateRandomProteinPermutation(c),
+		},
+	}
+	currNode = currNode.next
+	currNode.next = &StateNode{
+		next: s.root, // Back to beginning.
+		function: &ProteinFunction{
+			action:   BacteriaShouldApoptosis,
 			proteins: GenerateRandomProteinPermutation(c),
 		},
 	}

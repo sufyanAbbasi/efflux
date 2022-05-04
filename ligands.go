@@ -59,20 +59,14 @@ type LigandBlob struct {
 }
 
 type MaterialPool struct {
-	resourcePool      sync.Pool
-	localResourcePool sync.Pool
-	wastePool         sync.Pool
-	ligandPool        sync.Pool
+	resourcePool sync.Pool
+	wastePool    sync.Pool
+	ligandPool   sync.Pool
 }
 
 func InitializeMaterialPool() *MaterialPool {
 	return &MaterialPool{
 		resourcePool: sync.Pool{
-			New: func() interface{} {
-				return new(ResourceBlob)
-			},
-		},
-		localResourcePool: sync.Pool{
 			New: func() interface{} {
 				return new(ResourceBlob)
 			},
@@ -96,14 +90,6 @@ func (m *MaterialPool) GetResource() *ResourceBlob {
 
 func (m *MaterialPool) PutResource(r *ResourceBlob) {
 	m.resourcePool.Put(r)
-}
-
-func (m *MaterialPool) GetLocalResource() *ResourceBlob {
-	return m.localResourcePool.Get().(*ResourceBlob)
-}
-
-func (m *MaterialPool) PutLocalResource(r *ResourceBlob) {
-	m.localResourcePool.Put(r)
 }
 
 func (m *MaterialPool) GetWaste() *WasteBlob {
