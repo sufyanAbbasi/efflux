@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 )
 
 type StateDiagram struct {
+	sync.RWMutex
 	root    *StateNode
 	current *StateNode
 }
@@ -33,7 +35,9 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 					} else {
 						cancel()
 					}
+					s.Lock()
 					s.current = s.current.next
+					s.Unlock()
 				} else {
 					cancel()
 				}
@@ -42,12 +46,20 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 	}
 }
 
+func (s *StateDiagram) Graft(mutation *StateDiagram) {
+	s.Lock()
+	s.root = mutation.root
+	s.current = mutation.root
+	s.Unlock()
+}
+
 type CellActor interface {
 	Worker
+	AntigenPresenting
 	CellType() CellType
-	DNA() *DNA
 	Start(context.Context)
 	Parent() *Node
+	Function() *StateDiagram
 	HasTelomerase() bool
 	ShouldMitosis() bool
 	Mitosis() CellActor
@@ -496,6 +508,38 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 			action:   BacteriaShouldApoptosis,
 			proteins: GenerateRandomProteinPermutation(c),
 		},
+	}
+	return s
+}
+
+// Virus StateDiagrams
+
+func MakeVirusProtein(ctx context.Context, cell CellActor) bool {
+	// TODO: Implement this.
+	return true
+}
+
+func ProduceInterferon(ctx context.Context, cell CellActor) bool {
+	// TODO: Implement this.
+	return true
+}
+
+func ProduceVirus(c CellActor) *StateDiagram {
+	s := &StateDiagram{
+		root: &StateNode{
+			function: &ProteinFunction{
+				action:   MakeVirusProtein,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		},
+	}
+	currNode := s.root
+	currNode.next = &StateNode{
+		function: &ProteinFunction{
+			action:   ProduceInterferon,
+			proteins: GenerateRandomProteinPermutation(c),
+		},
+		next: s.root,
 	}
 	return s
 }

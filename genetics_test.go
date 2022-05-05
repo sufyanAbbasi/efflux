@@ -9,10 +9,14 @@ func TestCellVerification(t *testing.T) {
 	bacteria := MakeProkaryoticCell(bacteriaDNA, Bacterial)
 
 	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
-	virus := MakeVirus(virusRNA, Viral)
+	virus := MakeVirus(virusRNA, nil, Pneumocyte)
 
 	humanDNA := MakeDNA(HUMAN_DNA, "Human 1")
 	humanCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+
+	infectedHumanCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+	virus.InfectCell(infectedHumanCell)
+
 	tCell := MakeTCell(humanDNA, 0)
 
 	human2DNA := MakeDNA(HUMAN_DNA, "Human 2")
@@ -26,7 +30,7 @@ func TestCellVerification(t *testing.T) {
 		{"humanCell", tCell.CheckAntigen(humanCell), true},
 		{"human2Cell", tCell.CheckAntigen(human2Cell), false},
 		{"bacteria", tCell.CheckAntigen(bacteria), false},
-		{"virus", tCell.CheckAntigen(virus), false},
+		{"virus", tCell.CheckAntigen(infectedHumanCell), false},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -34,7 +38,7 @@ func TestCellVerification(t *testing.T) {
 		}
 	}
 
-	virus.InfectCell(humanCell.Cell)
+	virus.InfectCell(humanCell)
 	cases = []struct {
 		name      string
 		got, want bool

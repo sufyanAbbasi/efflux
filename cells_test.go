@@ -12,8 +12,12 @@ func TestDendriticCellFindTCells(t *testing.T) {
 
 	dendriticCell := MakeDendriticCell(humanDNA)
 
+	virus := MakeVirus(virusRNA, nil, Pneumocyte)
+	infectedCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+	virus.InfectCell(infectedCell)
+
 	dendriticCell.Collect(MakeProkaryoticCell(bacteriaDNA, Bacterial))
-	dendriticCell.Collect(MakeVirus(virusRNA, Viral))
+	dendriticCell.Collect(infectedCell)
 	dendriticCell.Collect(MakeEukaryoticStemCell(human2DNA, Pneumocyte, 0))
 
 	tCells := GenerateTCells(humanDNA)

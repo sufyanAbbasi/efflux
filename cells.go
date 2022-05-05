@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"reflect"
 	"sync"
 	"time"
@@ -87,8 +86,16 @@ func (c *Cell) DNA() *DNA {
 	return c.dna
 }
 
+func (c *Cell) SetDNA(dna *DNA) {
+	c.dna = dna
+}
+
 func (c *Cell) CellType() CellType {
 	return c.cellType
+}
+
+func (c *Cell) Function() *StateDiagram {
+	return c.function
 }
 
 func (c *Cell) WorkType() WorkType {
@@ -171,13 +178,15 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	return request
 }
 
-func (c *Cell) SampleProteins() []Protein {
-	// TODO: return a random sample of the internal protein state.
-	return []Protein{Protein(rand.Uint32()), Protein(rand.Uint32()), Protein(rand.Uint32())}
+func (c *Cell) SampleProteins() (proteins []Protein) {
+	if c.function != nil && c.function.current != nil {
+		return c.function.current.function.proteins
+	}
+	return
 }
 
-func (c *Cell) PresentAntigen() *Antigen {
-	if c.antigen == nil {
+func (c *Cell) PresentAntigen(reset bool) *Antigen {
+	if reset || c.antigen == nil {
 		c.antigen = c.dna.GenerateAntigen(c.SampleProteins())
 	}
 	return c.antigen
@@ -399,23 +408,27 @@ func (p *ProkaryoticCell) IsAerobic() bool {
 }
 
 type Virus struct {
-	Cell
+	dna              *DNA
+	cellTypeToInfect CellType
 }
 
-func MakeVirus(rna *DNA, cellType CellType) *Virus {
+func MakeVirus(dna *DNA, function *StateDiagram, cellTypeToInfect CellType) *Virus {
+	dna.makeFunction = ProduceVirus
 	return &Virus{
-		Cell: Cell{
-			cellType: cellType,
-			dna:      rna,
-			mhc_i:    rna.MHC_I(),
-		},
+		dna:              dna,
+		cellTypeToInfect: cellTypeToInfect,
 	}
 }
 
-func (v *Virus) InfectCell(c *Cell) {
-	c.dna = v.dna
-	c.antigen = nil
-	c.PresentAntigen()
+func (v *Virus) InfectCell(c CellActor) {
+	if c.CellType() == v.cellTypeToInfect {
+		c.SetDNA(v.dna)
+		c.PresentAntigen(true)
+		function := c.Function()
+		if function != nil {
+			function.Graft(v.dna.makeFunction(c))
+		}
+	}
 }
 
 type ImmuneCell struct {
@@ -423,13 +436,14 @@ type ImmuneCell struct {
 }
 
 type AntigenPresenting interface {
-	PresentAntigen() *Antigen
+	PresentAntigen(reset bool) *Antigen
+	SetDNA(*DNA)
 	DNA() *DNA
 }
 
 func (i *ImmuneCell) CheckAntigen(c AntigenPresenting) bool {
-	if c.PresentAntigen() == nil ||
-		!i.dna.Verify(i.mhc_i, c.PresentAntigen()) {
+	if c.PresentAntigen(false) == nil ||
+		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
 		fmt.Println("KILL:", c)
 		return false
 	} else {
@@ -472,7 +486,7 @@ type DendriticCell struct {
 }
 
 func (d *DendriticCell) Collect(t AntigenPresenting) {
-	for _, p := range t.PresentAntigen().proteins {
+	for _, p := range t.PresentAntigen(false).proteins {
 		d.proteinSignatures[p] = false
 	}
 }
