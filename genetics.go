@@ -5,7 +5,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
+	"fmt"
 	"log"
 )
 
@@ -14,6 +16,13 @@ var BACTERIA_DNA = elliptic.P384()
 var VIRUS_RNA = elliptic.P224()
 
 type DNAType elliptic.Curve
+
+var DNATypeMap = map[int]DNAType{
+	521: HUMAN_DNA,
+	384: BACTERIA_DNA,
+	224: VIRUS_RNA,
+}
+
 type DNA struct {
 	name         string
 	base         *ecdsa.PrivateKey
@@ -41,14 +50,40 @@ func MakeDNA(dnaType DNAType, name string) *DNA {
 		base:    privateKey,
 		dnaType: dnaType,
 	}
-	dna.selfProteins = dna.GenerateSelfProteins()
-	switch dnaType {
-	case HUMAN_DNA:
-		dna.makeFunction = MakeStateDiagramByEukaryote
-	case BACTERIA_DNA:
-		dna.makeFunction = MakeStateDiagramByProkaryote
-	}
+	dna.Initialize()
 	return dna
+}
+
+func MakeDNAFromRequest(request TransportRequest) (*DNA, error) {
+	privateKey, err := x509.ParseECPrivateKey(request.Base)
+	if err != nil {
+		return nil, err
+	}
+	dNAType, ok := DNATypeMap[request.DNAType]
+	if !ok {
+		return nil, fmt.Errorf("cannot find DNA Type: %v", request.DNAType)
+	}
+	dna := &DNA{
+		name:    request.Name,
+		base:    privateKey,
+		dnaType: dNAType,
+	}
+	dna.Initialize()
+	return dna, nil
+}
+
+func (d *DNA) Initialize() {
+	d.selfProteins = d.GenerateSelfProteins()
+	switch d.dnaType {
+	case HUMAN_DNA:
+		d.makeFunction = MakeStateDiagramByEukaryote
+	case BACTERIA_DNA:
+		d.makeFunction = MakeStateDiagramByProkaryote
+	}
+}
+
+func (d *DNA) Serialize() ([]byte, error) {
+	return x509.MarshalECPrivateKey(d.base)
 }
 
 func (d *DNA) MHC_I() MHC_I {

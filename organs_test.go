@@ -49,7 +49,8 @@ func TestTwoNodeInteraction(t *testing.T) {
 	testGraph := &Graph{
 		allNodes: make(map[string]*Node),
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	node1 := InitializeNewNode(ctx, testGraph, "node1")
 	node1.materialPool = nil
 	node2 := InitializeNewNode(ctx, testGraph, "node2")
@@ -111,7 +112,8 @@ func TestThreeNodeInteraction(t *testing.T) {
 	testGraph := &Graph{
 		allNodes: make(map[string]*Node),
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	node1 := InitializeNewNode(ctx, testGraph, "node1")
 	node1.materialPool = nil
 	node2 := InitializeNewNode(ctx, testGraph, "node2")

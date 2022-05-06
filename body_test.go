@@ -6,5 +6,7 @@ import (
 )
 
 func TestBodyGeneration(t *testing.T) {
-	GenerateBody(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	GenerateBody(ctx)
 }

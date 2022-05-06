@@ -88,8 +88,43 @@ type WorkStatusData struct {
 	CompletedFailureCount int    `json:"completedFailureCount"`
 }
 
+type TransportRequest struct {
+	Name     string
+	Base     []byte
+	DNAType  int // Curve number, like elliptic.P384()
+	CellType CellType
+	WorkType WorkType
+}
+
 type Edge struct {
-	connection *websocket.Conn
+	connection   *websocket.Conn
+	transportUrl string
+}
+
+func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields() // catch unwanted fields
+
+	request := TransportRequest{}
+
+	err := d.Decode(&request)
+	if err != nil {
+		// bad JSON or unrecognized json field
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cell, err := MakeCellFromRequest(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cell.SetParent(n)
+	fmt.Println("Initialized:", cell, "in", cell.Parent())
+	cell.Start(context.Background())
+
+	fmt.Fprintf(w, "Success: Created %s", cell)
 }
 
 func SendWork(connection *websocket.Conn, request Work) {
@@ -132,33 +167,38 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
+	ctx          context.Context
 	name         string
 	edges        []*Edge
 	serverMux    *http.ServeMux
 	origin       string
 	port         string
 	websocketUrl string
+	transportUrl string
 	managers     map[WorkType]*WorkManager
 	materialPool *MaterialPool
 }
 
 var currentPort = 7999
 
-func GetNextAddresses() (string, string, string, string) {
+func GetNextAddresses() (string, string, string, string, string) {
 	currentPort++
 	return ORIGIN,
 		fmt.Sprintf(":%v", currentPort),
 		fmt.Sprintf(URL_TEMPLATE, currentPort),
-		fmt.Sprintf(WEBSOCKET_URL_TEMPLATE, currentPort)
+		fmt.Sprintf(WEBSOCKET_URL_TEMPLATE, currentPort),
+		fmt.Sprintf(TRANSPORT_URL_TEMPLATE, currentPort)
 }
 
 func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
-	origin, port, url, websocketUrl := GetNextAddresses()
+	origin, port, url, websocketUrl, transportUrl := GetNextAddresses()
 	node := &Node{
+		ctx:          ctx,
 		name:         name,
 		origin:       origin,
 		port:         port,
 		websocketUrl: websocketUrl,
+		transportUrl: transportUrl,
 		managers:     make(map[WorkType]*WorkManager),
 	}
 	node.materialPool = InitializeMaterialPool()
@@ -168,13 +208,14 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 }
 
 func (n *Node) String() string {
-	return fmt.Sprintf("%v%v (%T)", n.name, n.port, n)
+	return fmt.Sprintf("%v (%v%v)", n.name, n.origin[:len(n.origin)-1], n.port)
 }
 
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
 	n.serverMux.Handle(WORK_ENDPOINT, websocket.Handler(n.ProcessIncomingWorkRequests))
 	n.serverMux.Handle(STATUS_ENDPOINT, websocket.Handler(n.GetNodeStatus))
+	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, n.HandleTransportRequest)
 
 	go func() {
 		err := http.ListenAndServe(n.port, n.serverMux)
@@ -196,7 +237,7 @@ func (n *Node) Start(ctx context.Context) {
 	}()
 }
 
-func (n *Node) Connect(ctx context.Context, origin, websocketUrl string) {
+func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string) {
 	connection, err := websocket.Dial(websocketUrl, "", origin)
 	if err != nil {
 		log.Fatal(fmt.Sprintf("%v Connect: ", n), err)
@@ -204,14 +245,15 @@ func (n *Node) Connect(ctx context.Context, origin, websocketUrl string) {
 	n.Lock()
 	defer n.Unlock()
 	n.edges = append(n.edges, &Edge{
-		connection: connection,
+		connection:   connection,
+		transportUrl: transportUrl,
 	})
 	go n.ProcessIncomingWorkResponses(ctx, connection)
 }
 
 func ConnectNodes(ctx context.Context, node1, node2 *Node) {
-	node1.Connect(ctx, node2.origin, node2.websocketUrl)
-	node2.Connect(ctx, node1.origin, node1.websocketUrl)
+	node1.Connect(ctx, node2.origin, node2.websocketUrl, node2.transportUrl)
+	node2.Connect(ctx, node1.origin, node1.websocketUrl, node1.transportUrl)
 }
 
 func (n *Node) MakeAvailable(worker Worker) {
@@ -253,42 +295,47 @@ func (n *Node) RemoveWorker(worker Worker) {
 func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 	defer connection.Close()
 	for {
-		work := ReceiveWork(connection)
-		if n.materialPool != nil && work.workType == diffusion {
-			n.ProcessDiffusionRequest(work)
-			continue
-		}
-		manager, ok := n.managers[work.workType]
-		if ok {
-			if manager.nextAvailableWorker == nil {
-				// Ignore: a request we can't handle with the workers we have.
+		select {
+		case <-n.ctx.Done():
+			return
+		default:
+			work := ReceiveWork(connection)
+			if n.materialPool != nil && work.workType == diffusion {
+				n.ProcessDiffusionRequest(work)
 				continue
 			}
-			if work.status == 0 {
-				// Recieved work request.
-				ctx, cancel := context.WithTimeout(context.Background(), WAIT_FOR_WORKER_SEC)
-				select {
-				case w := <-manager.nextAvailableWorker:
-					finishedWork := w.Work(ctx, work)
-					// fmt.Printf("%v Finished work: %v\n", n, finishedWork)
-					SendWork(connection, finishedWork)
-					manager.Lock()
-					manager.completedCount++
-					if finishedWork.status != 200 {
-						manager.completedFailureCount++
-					}
-					manager.Unlock()
-				case <-ctx.Done():
-					// Didn't have enough workers to process, we need more cells.
-					// Signal growth ligand.
-					ligand := n.materialPool.GetLigand()
-					ligand.growth++
-					n.materialPool.PutLigand(ligand)
+			manager, ok := n.managers[work.workType]
+			if ok {
+				if manager.nextAvailableWorker == nil {
+					// Ignore: a request we can't handle with the workers we have.
+					continue
 				}
-				cancel()
-			} else {
-				// Received completed work, which is not expected.
-				log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
+				if work.status == 0 {
+					// Recieved work request.
+					ctx, cancel := context.WithTimeout(context.Background(), WAIT_FOR_WORKER_SEC)
+					select {
+					case w := <-manager.nextAvailableWorker:
+						finishedWork := w.Work(ctx, work)
+						// fmt.Printf("%v Finished work: %v\n", n, finishedWork)
+						SendWork(connection, finishedWork)
+						manager.Lock()
+						manager.completedCount++
+						if finishedWork.status != 200 {
+							manager.completedFailureCount++
+						}
+						manager.Unlock()
+					case <-ctx.Done():
+						// Didn't have enough workers to process, we need more cells.
+						// Signal growth ligand.
+						ligand := n.materialPool.GetLigand()
+						ligand.growth++
+						n.materialPool.PutLigand(ligand)
+					}
+					cancel()
+				} else {
+					// Received completed work, which is not expected.
+					log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
+				}
 			}
 		}
 	}
@@ -319,38 +366,42 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 	defer connection.Close()
 	ticker := time.NewTicker(STATUS_SOCKET_CLOCK_RATE)
 	for {
-		<-ticker.C
-		var connections []string
-		for _, edge := range n.edges {
-			address := strings.Replace(edge.connection.RemoteAddr().String(), "/work", "/status", 1)
-			connections = append(connections, address)
-		}
-		var workStatus []WorkStatusData
-		for workType, manager := range n.managers {
-			manager.Lock()
-			workStatus = append(workStatus, WorkStatusData{
-				WorkType:              workType.String(),
-				RequestCount:          manager.requestCount,
-				SuccessCount:          manager.successCount,
-				FailureCount:          manager.failureCount,
-				CompletedCount:        manager.completedCount,
-				CompletedFailureCount: manager.completedFailureCount,
-			})
-			manager.requestCount = 0
-			manager.successCount = 0
-			manager.failureCount = 0
-			manager.completedCount = 0
-			manager.completedFailureCount = 0
-			manager.Unlock()
-		}
-		err := SendStatus(connection, StatusSocketData{
-			Status:      200,
-			Name:        n.name,
-			Connections: connections,
-			WorkStatus:  workStatus,
-		})
-		if err != nil {
+		select {
+		case <-n.ctx.Done():
 			return
+		case <-ticker.C:
+			var connections []string
+			for _, edge := range n.edges {
+				address := strings.Replace(edge.connection.RemoteAddr().String(), "/work", "/status", 1)
+				connections = append(connections, address)
+			}
+			var workStatus []WorkStatusData
+			for workType, manager := range n.managers {
+				manager.Lock()
+				workStatus = append(workStatus, WorkStatusData{
+					WorkType:              workType.String(),
+					RequestCount:          manager.requestCount,
+					SuccessCount:          manager.successCount,
+					FailureCount:          manager.failureCount,
+					CompletedCount:        manager.completedCount,
+					CompletedFailureCount: manager.completedFailureCount,
+				})
+				manager.requestCount = 0
+				manager.successCount = 0
+				manager.failureCount = 0
+				manager.completedCount = 0
+				manager.completedFailureCount = 0
+				manager.Unlock()
+			}
+			err := SendStatus(connection, StatusSocketData{
+				Status:      200,
+				Name:        n.name,
+				Connections: connections,
+				WorkStatus:  workStatus,
+			})
+			if err != nil {
+				return
+			}
 		}
 	}
 }

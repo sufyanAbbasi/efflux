@@ -14,7 +14,6 @@ type CellType int
 const (
 	Bacterial    CellType = iota
 	Bacteroidota          // Bacteria that synthesize vitamins in the gut.
-	Viral
 	RedBlood
 	Neuron
 	Cardiomyocyte // Heart Cell
@@ -32,8 +31,6 @@ func (c CellType) String() string {
 		return "Bacterial"
 	case Bacteroidota:
 		return "Bacteroidota"
-	case Viral:
-		return "Viral"
 	case RedBlood:
 		return "RedBlood"
 	case Neuron:
@@ -510,4 +507,39 @@ func MakeDendriticCell(dna *DNA) *DendriticCell {
 		},
 		proteinSignatures: make(map[Protein]bool),
 	}
+}
+
+func MakeCellFromRequest(request TransportRequest) (CellActor, error) {
+	dna, err := MakeDNAFromRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	var cell CellActor
+	switch request.CellType {
+	case Bacterial:
+		fallthrough
+	case Bacteroidota:
+		cell = MakeProkaryoticCell(dna, request.CellType)
+	case RedBlood:
+		fallthrough
+	case Neuron:
+		fallthrough
+	case Cardiomyocyte:
+		fallthrough
+	case Pneumocyte:
+		fallthrough
+	case Myocyte:
+		fallthrough
+	case Keratinocyte:
+		fallthrough
+	case Enterocyte:
+		fallthrough
+	case TLymphocyte:
+		fallthrough
+	case Dendritic:
+		fallthrough
+	default:
+		cell = MakeEukaryoticStemCell(dna, request.CellType, request.WorkType)
+	}
+	return cell, nil
 }

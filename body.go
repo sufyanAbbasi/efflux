@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"encoding/json"
+	"log"
+	"net/http"
 )
 
 type EdgeType int // Determines how Nodes are connected.
@@ -29,6 +32,49 @@ type Body struct {
 	lungNodes   []*Node
 	muscleNodes []*Node
 	skinNodes   []*Node
+}
+
+func MakeTransportRequest(
+	transportUrl string,
+	name string,
+	dna *DNA,
+	cellType CellType,
+	workType WorkType,
+) {
+	dnaBase, err := dna.Serialize()
+	if err != nil {
+		log.Fatal("Transport: ", err)
+	}
+	dnaType := 0
+	for i, d := range DNATypeMap {
+		if d == dna.dnaType {
+			dnaType = i
+		}
+	}
+	jsonData, err := json.Marshal(TransportRequest{
+		Name:     name,
+		Base:     dnaBase,
+		DNAType:  dnaType,
+		CellType: cellType,
+		WorkType: workType,
+	})
+	if err != nil {
+		log.Fatal("Transport: ", err)
+	}
+	request, err := http.NewRequest("POST", transportUrl, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Fatal("Transport: ", err)
+	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	response, err := client.Do(request)
+	if err != nil {
+		log.Fatal("Transport: ", err)
+	}
+	defer response.Body.Close()
+	// body, _ := ioutil.ReadAll(response.Body)
+	// fmt.Println("Body:", string(body))
 }
 
 func (b *Body) GenerateCellsAndStart(ctx context.Context) {
@@ -76,10 +122,11 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
-				cell := MakeEukaryoticStemCell(humanDNA, cellTypes[i], workTypes[i])
-				cell.parent = node
-				fmt.Println("Initialized:", cell, "in", cell.parent)
-				cell.Start(ctx)
+				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i])
+				// cell := MakeEukaryoticStemCell(humanDNA, cellTypes[i], workTypes[i])
+				// cell.parent = node
+				// fmt.Println("Initialized:", cell, "in", cell.parent)
+				// cell.Start(ctx)
 			}
 		}
 	}
@@ -100,10 +147,11 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			cellType := cellTypes[i]
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 			for j := 0; j < counts[i]; j++ {
-				cell := MakeProkaryoticCell(bacteriaDNA, cellType)
-				cell.parent = node
-				fmt.Println("Initialized:", cell, "in", cell.parent)
-				cell.Start(ctx)
+				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], 0)
+				// cell := MakeProkaryoticCell(bacteriaDNA, cellType)
+				// cell.parent = node
+				// fmt.Println("Initialized:", cell, "in", cell.parent)
+				// cell.Start(ctx)
 			}
 		}
 	}

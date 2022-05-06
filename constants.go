@@ -12,11 +12,12 @@ const DEFAULT_BACTERIA_GENERATION_DURATION = 1 * time.Minute
 
 const WORK_ENDPOINT = "/work"
 const STATUS_ENDPOINT = "/status"
-const WORLD_ENDPOINT = "/world"
+const TRANSPORT_ENDPOINT = "/transport"
 
 const ORIGIN = "http://localhost/"
 const URL_TEMPLATE = "http://localhost:%v"
 const WEBSOCKET_URL_TEMPLATE = "ws://localhost:%v" + WORK_ENDPOINT
+const TRANSPORT_URL_TEMPLATE = URL_TEMPLATE + TRANSPORT_ENDPOINT
 
 const VITAMIN_COST_MITOSIS = 100
 const GLUCOSE_COST_MITOSIS = 500
