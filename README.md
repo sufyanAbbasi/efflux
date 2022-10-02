@@ -1,4 +1,4 @@
-# MHC Class Ietic
+# Efflux
 > A simulation video game based on the immune system
 
 ## Goal
