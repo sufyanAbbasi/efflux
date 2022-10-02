@@ -6,6 +6,15 @@ This project is an attempt to simulate the complex and beautiful system that
 keeps us alive, based on the book ["Immune: A Journey into the System that
 Keeps You Alive"](https://www.philippdettmer.net/immune).
 
+## Getting Started
+- Make sure to have Go installed on your machine.
+- In a terminal window, run
+  ```bash
+  go run .
+  ```
+- Visit the status page at http://localhost:3000/public.
+- You can click on a node to render it!
+
 ## Concepts
 There are three main parts to this simulation: a genetic authentication 
 system, a body abstraction, and a multiplayer immune system.
