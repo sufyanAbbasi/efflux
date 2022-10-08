@@ -63,6 +63,8 @@ type CellActor interface {
 	HasTelomerase() bool
 	ShouldMitosis() bool
 	Mitosis() CellActor
+	CollectResources(context.Context) bool
+	ProduceWaste()
 	Damage() int
 	Repair(int)
 	IncurDamage(int)
@@ -134,12 +136,12 @@ func ShouldMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	// - No damage on the cell
 	// - Enough growth ligand (signal)
 	// - Enough vitamin resources
-	if cell.Damage() <= DAMAGE_MITOSIS_THRESHOLD && cell.ShouldMitosis() {
-		if resource.vitamins >= VITAMIN_COST_MITOSIS {
-			resource.vitamins -= VITAMIN_COST_MITOSIS
-			c := cell.Mitosis()
-			c.Start(ctx)
-		}
+	if cell.Damage() <= DAMAGE_MITOSIS_THRESHOLD &&
+		resource.vitamins >= VITAMIN_COST_MITOSIS &&
+		cell.ShouldMitosis() {
+		resource.vitamins -= VITAMIN_COST_MITOSIS
+		c := cell.Mitosis()
+		c.Start(ctx)
 	}
 	return true
 }
@@ -219,6 +221,12 @@ func MuscleFindFood(ctx context.Context, cell CellActor) bool {
 			workType: digest,
 		})
 	}
+	if rand.Intn(3) == 0 {
+		// Successfully found a food unit.
+		cell.Parent().RequestWork(Work{
+			workType: digest,
+		})
+	}
 
 	return true
 }
@@ -237,6 +245,12 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	defer cell.Parent().materialPool.PutResource(resource)
 	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD {
 		// If vitamin levels are low, move more.
+		cell.Parent().RequestWork(Work{
+			workType: move,
+		})
+	}
+	if resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
+		// If glocose levels are low, move more.
 		cell.Parent().RequestWork(Work{
 			workType: move,
 		})
@@ -394,67 +408,32 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 
 // Bacteria Related CellActions
 
-func Digest(ctx context.Context, cell CellActor) bool {
-	if cell.IsAerobic() && cell.IsOxygenated() {
-		resource := cell.Parent().materialPool.GetResource()
-		defer cell.Parent().materialPool.PutResource(resource)
-		if resource.glucose > 0 {
-			// Convert glucose to vitamins.
-			resource := cell.Parent().materialPool.GetResource()
-			defer cell.Parent().materialPool.PutResource(resource)
-			resource.vitamins += resource.glucose
-		}
-		cell.Oxygenate(false)
-	}
-	return true
-}
-
 func BacteriaShouldMitosis(ctx context.Context, cell CellActor) bool {
 	// Bacteria will not be allowed to repair itself.
 	// Three conditions for bacteria mitosis, may allow runaway growth:
 	// - Enough internal energy (successful calls to Oxygenate)
 	// - Enough vitamin or glucose resources (not picky)
 	// - Enough time has passed
-	if cell.ShouldMitosis() {
-		resource := cell.Parent().materialPool.GetResource()
-		defer cell.Parent().materialPool.PutResource(resource)
-		if resource.glucose >= GLUCOSE_COST_MITOSIS {
-			resource.glucose -= GLUCOSE_COST_MITOSIS
-			c := cell.Mitosis()
-			c.Start(ctx)
-		} else if resource.vitamins >= VITAMIN_COST_MITOSIS {
-			resource.vitamins -= VITAMIN_COST_MITOSIS
-			c := cell.Mitosis()
-			c.Start(ctx)
-		}
+	resource := cell.Parent().materialPool.GetResource()
+	defer cell.Parent().materialPool.PutResource(resource)
+	if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.ShouldMitosis() {
+		resource.glucose -= GLUCOSE_COST_MITOSIS
+		c := cell.Mitosis()
+		c.Start(ctx)
+	} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.ShouldMitosis() {
+		resource.vitamins -= VITAMIN_COST_MITOSIS
+		c := cell.Mitosis()
+		c.Start(ctx)
 	}
 	return true
 }
 
 func BacteriaConsume(ctx context.Context, cell CellActor) bool {
-	if cell.IsAerobic() {
-		// Consume a unit of 02 for a unit of CO2
-		resource := cell.Parent().materialPool.GetResource()
-		defer cell.Parent().materialPool.PutResource(resource)
-		if resource.o2 > 6 {
-			resource.o2 -= 6
-			cell.Oxygenate(true)
-			waste := cell.Parent().materialPool.GetWaste()
-			defer cell.Parent().materialPool.PutWaste(waste)
-			if waste.co2 > 6 {
-				waste.co2 -= 6
-			} else {
-				waste.co2 = 0
-			}
-		}
-	} else {
-		waste := cell.Parent().materialPool.GetWaste()
-		defer cell.Parent().materialPool.PutWaste(waste)
-		if waste.co2 > 6 {
-			waste.co2 -= 6
-			waste.toxins += 1
-		}
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
+	if cell.CollectResources(ctx) {
 		cell.Oxygenate(true)
+		cell.ProduceWaste()
 	}
 	return true
 }
@@ -485,16 +464,6 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 		},
 	}
 	currNode := s.root
-	switch c.CellType() {
-	case Bacteroidota:
-		currNode.next = &StateNode{
-			function: &ProteinFunction{
-				action:   Digest,
-				proteins: GenerateRandomProteinPermutation(c),
-			},
-		}
-		currNode = currNode.next
-	}
 	currNode.next = &StateNode{
 		function: &ProteinFunction{
 			action:   BacteriaConsume,

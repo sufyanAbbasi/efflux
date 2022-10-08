@@ -55,18 +55,34 @@ class Node {
         this.status = null;
         this.socket = null;
         this.edges = new WeakSet();
+        this.render = null;
         this.renderCyNode();
-        this.setupConnection(address);
+        this.setupStatusConnection(address);
     }
 
-    processSocket(socket) {
-        console.log('Connected:', this.address);
+    async setupStatusConnection(address) {
+        const socket = new WebSocket(address + '/status')
+        try {
+            this.processStatusSocket(await new Promise((resolve, reject) => {
+                socket.onopen = () => {
+                    resolve(socket);
+                };
+                socket.onclose = reject;
+            }));
+            NodeMap.set(address, this);
+        } catch (err) {
+            console.error('Connection refused:', address, err);
+        }
+    }
+
+    processStatusSocket(socket) {
+        console.log('Connected Status:', this.address);
         this.socket = socket;
         socket.onmessage = (event) => {
             this.getStatus(event);
         }
         socket.onclose = () => {
-            console.log('Closed:', this.address);
+            console.log('Closed Status:', this.address);
         };
     }
 
@@ -81,7 +97,7 @@ class Node {
         this.name = data.name ? `${data.name} (${this.id})` : 'Unknown';
         let option = document.querySelector(`option[value="#${this.id}"]`);
         if (!option) {
-            this.renderSelection();
+            this.renderOption();
         }
 
         if (this.status.connections) {
@@ -117,26 +133,12 @@ class Node {
         cy.$(`#${this.id}`).data('label', this.label);
     }
 
-    setupConnection(address) {
-        const socket = new WebSocket(address)
-        return new Promise((resolve, reject) => {
-            socket.onopen = () => {
-                resolve(socket);
-            };
-            socket.onclose = reject;
-        }).then((socket) => {
-            this.processSocket(socket);
-            NodeMap.set(address, this);
-        }).catch((err) => {
-            console.error('Connection refused:', address, err);
-        });
-    }
-
     renderCyNode() {
         cy.add({
             group: 'nodes',
             data: { 
                 id: this.id,
+                address: this.address,
                 label: this.label,
             },
         });
@@ -155,7 +157,7 @@ class Node {
         cy.layout(layout).run();
     }
 
-    renderSelection() {
+    renderOption() {
         const option = document.createElement('option');
         option.setAttribute('value', `#${this.id}`);
         option.textContent = this.name;
@@ -167,11 +169,128 @@ class Node {
         }
         optgroup.appendChild(option)
     }
+
+    renderScene() {
+        this.collapseScene();
+        const renderContainer = document.querySelector('.render')
+        renderContainer.classList.add('show')
+        let scene = document.querySelector('a-scene');
+        if (!scene) {
+            scene = document.createElement('a-scene');
+            scene.setAttribute('embedded');
+            const sky = document.createElement('a-sky');
+            sky.setAttribute('color', 'white');
+            scene.appendChild(sky);
+            renderContainer.appendChild(scene);
+        }
+        this.render = new Render(this);
+        const closeButton = document.createElement('button')
+        closeButton.textContent = 'Close';
+        closeButton.classList.add('close');
+        closeButton.addEventListener('click', () => {
+            this.collapseScene();
+        })
+        renderContainer.appendChild(closeButton);
+    }
+
+    collapseScene() {
+        // May be called multiple times.
+        const elements = document.querySelectorAll('.cell');
+        for (const el of elements) {
+            el.parent.removeChild();
+        }
+        const closeButtons = document.querySelectorAll('.close');
+        closeButtons.forEach((d) => d.remove())
+        const renderContainer = document.querySelector('.render')
+        renderContainer.classList.remove('show')
+        this.render?.socket?.close();
+        this.render = null
+    }
 }
 
 Node.makeNode = (origin, port, cy) => {
     const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
-    return new Node(`${scheme}${origin}:${port}/status`);
+    return new Node(`${scheme}${origin}:${port}`);
+}
+
+class Render {
+    constructor(node) {
+        this.node = node;
+        this.socket = null;
+        this.render = null;
+        this.setupRenderConnection(node.address);
+    }
+
+    async setupRenderConnection(address) {
+        const socket = new WebSocket(address + '/render')
+        try {
+            this.processRenderSocket(await new Promise((resolve, reject) => {
+                socket.onopen = () => {
+                    resolve(socket);
+                };
+                socket.onclose = reject;
+            }));
+        } catch (err) {
+            console.error('Connection refused:', address, err);
+        }
+    }
+
+    processRenderSocket(socket) {
+        console.log('Connected Render:', this.node.address);
+        this.socket = socket;
+        socket.onmessage = (event) => {
+            this.getRender(event);
+        }
+        socket.onclose = () => {
+            console.log('Closed Render:', this.node.address);
+            this.node.collapseScene();
+        };
+    }
+
+    getRender({data}) {
+        let renderData;
+        try {
+            renderData = JSON.parse(data);
+        } catch (e) {
+            console.error(e);
+            renderData = null;
+        }
+        const {
+            id,
+            visible,
+            x,
+            y,
+            z,
+            rx,
+            ry,
+            rz,
+            sx,
+            sy,
+            sz,
+            color,
+            geometry,
+        } = renderData;
+        // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+        let el = document.querySelector(`#${id}`);
+        if (!el) {
+            switch(geometry) {
+                case "sphere":
+                    el = document.createElement('a-sphere');
+                    break;
+                default:        
+                    el = document.createElement('a-sphere');
+            }
+            el.classList.add('cell');
+            el.setAttribute('id', `${id}`);
+            el.setAttribute('radius', 0.25);
+            document.querySelector('a-scene')?.appendChild(el);
+        }
+        el.object3D.visible = visible;
+        el.object3D.position.set(x, y, z)
+        el.object3D.rotation.set(rx, ry, rz)
+        el.object3D.scale.set(sx, sy, sz);
+        el.setAttribute('color', color || 'red');
+    }
 }
 
 function init() {
@@ -182,6 +301,12 @@ function init() {
     const root = Node.makeNode(window.location.hostname, 8000);
     NodeMap.set(root.address, root);
     layout.roots = [root.id];
+
+    cy.on('click', 'node', (e) => {
+        const clickedNode = e.target;
+        const node = NodeMap.get(clickedNode.data('address'));
+        node?.renderScene()
+      });
 }
 
 window.addEventListener('DOMContentLoaded', init);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"reflect"
 	"sync"
 	"time"
@@ -65,6 +66,9 @@ type Cell struct {
 	damage       int
 	function     *StateDiagram
 	oxygenated   bool
+	renderId     RenderID
+	render       *Renderable
+	detach       func()
 }
 
 func (c *Cell) String() string {
@@ -124,6 +128,13 @@ func (c *Cell) IncurDamage(damage int) {
 	fmt.Println("Damaged:", c)
 }
 
+func (c *Cell) Apoptosis() {
+	c.parent = nil
+	if c.detach != nil {
+		c.detach()
+	}
+}
+
 func (c *Cell) Work(ctx context.Context, request Work) Work {
 	if request.workType != c.workType {
 		log.Fatalf("Cell %v is unable to perform work: %v", c, request)
@@ -149,9 +160,11 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		request.status = 200
 		request.result = "Completed."
 	case Enterocyte:
-		resource := c.parent.materialPool.GetResource()
-		resource.glucose += 6
-		c.parent.materialPool.PutResource(resource)
+		for i := 0; i < GLUCOSE_INTAKE/6; i++ {
+			resource := c.parent.materialPool.GetResource()
+			resource.glucose += 6
+			c.parent.materialPool.PutResource(resource)
+		}
 		request.status = 200
 		request.result = "Completed."
 	case Pneumocyte:
@@ -189,29 +202,6 @@ func (c *Cell) PresentAntigen(reset bool) *Antigen {
 	return c.antigen
 }
 
-func (c *Cell) ResetResourceNeed() {
-	switch c.cellType {
-	case Pneumocyte:
-		fallthrough
-	case Keratinocyte:
-		fallthrough
-	case RedBlood:
-		c.resourceNeed = &ResourceBlob{
-			o2: 0,
-		}
-	case Neuron:
-		fallthrough
-	case Cardiomyocyte:
-		fallthrough
-	case Myocyte:
-		fallthrough
-	default:
-		c.resourceNeed = &ResourceBlob{
-			o2: 6,
-		}
-	}
-}
-
 func (c *Cell) CollectResources(ctx context.Context) bool {
 	if c.resourceNeed == nil {
 		c.ResetResourceNeed()
@@ -230,6 +220,40 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 	return true
 }
 
+func (c *Cell) ResetResourceNeed() {
+	switch c.cellType {
+	case Pneumocyte:
+		fallthrough
+	case Keratinocyte:
+		fallthrough
+	case Enterocyte:
+		fallthrough
+	case RedBlood:
+		c.resourceNeed = &ResourceBlob{
+			o2: 0,
+		}
+	case Neuron:
+		c.resourceNeed = &ResourceBlob{
+			o2: 6,
+			// glucose: 6,
+		}
+	case Bacteroidota:
+		c.resourceNeed = &ResourceBlob{
+			o2:      6,
+			glucose: 60,
+		}
+	case Cardiomyocyte:
+		fallthrough
+	case Myocyte:
+		fallthrough
+	default:
+		c.resourceNeed = &ResourceBlob{
+			o2: 6,
+			// glucose: 6,
+		}
+	}
+}
+
 func (c *Cell) ProduceWaste() {
 	if c.parent.materialPool != nil {
 		switch c.cellType {
@@ -237,8 +261,17 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Keratinocyte:
 			fallthrough
+		case Enterocyte:
+			fallthrough
 		case RedBlood:
 			// No waste produced.
+		case Bacteroidota:
+			waste := c.parent.materialPool.GetWaste()
+			waste.co2 += 6
+			c.parent.materialPool.PutWaste(waste)
+			resource := c.Parent().materialPool.GetResource()
+			resource.vitamins += 60
+			c.Parent().materialPool.PutResource(resource)
 		case Neuron:
 			fallthrough
 		case Cardiomyocyte:
@@ -253,6 +286,18 @@ func (c *Cell) ProduceWaste() {
 	}
 }
 
+func (c *Cell) Render() {
+	c.render = &Renderable{
+		id: c.renderId,
+		render: &Render{
+			visible:  true,
+			color:    0xFF0000FF,
+			geometry: "sphere",
+		},
+	}
+	c.detach = c.parent.world.Attach(c.render)
+}
+
 type EukaryoticCell struct {
 	*Cell
 	telomereLength int
@@ -262,6 +307,7 @@ type EukaryoticCell struct {
 func (e *EukaryoticCell) Start(ctx context.Context) {
 	e.function = e.dna.makeFunction(e)
 	go e.function.Run(ctx, e)
+	e.Render()
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -293,10 +339,10 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 }
 
 func (e *EukaryoticCell) Apoptosis() {
+	e.Cell.Apoptosis()
 	if e.parent != nil {
 		e.parent.RemoveWorker(e)
 	}
-	e.parent = nil
 	// TODO: make sure this gets garbage collected.
 }
 
@@ -327,6 +373,7 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 			dna:      dna,
 			mhc_i:    dna.MHC_I(),
 			workType: workType,
+			renderId: RenderID(fmt.Sprintf("%v%v", cellType, rand.Intn(1000000))),
 		},
 		telomereLength: 100,
 		hasTelomerase:  true,
@@ -334,7 +381,7 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 }
 
 type ProkaryoticCell struct {
-	Cell
+	*Cell
 	generationTime     time.Duration
 	lastGenerationTime time.Time
 	energy             int
@@ -349,10 +396,11 @@ func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
 		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
 	}
 	return &ProkaryoticCell{
-		Cell: Cell{
+		Cell: &Cell{
 			cellType: cellType,
 			dna:      dna,
 			mhc_i:    dna.MHC_I(),
+			renderId: RenderID(fmt.Sprintf("%v%v", cellType, rand.Intn(1000000))),
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -362,15 +410,11 @@ func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
 func (p *ProkaryoticCell) Start(ctx context.Context) {
 	p.function = p.dna.makeFunction(p)
 	go p.function.Run(ctx, p)
+	p.Render()
 }
 
 func (p *ProkaryoticCell) HasTelomerase() bool {
 	return false
-}
-
-func (p *ProkaryoticCell) Apoptosis() {
-	p.parent = nil
-	// TODO: make sure this gets garbage collected.
 }
 
 func (p *ProkaryoticCell) ShouldMitosis() bool {
@@ -391,7 +435,7 @@ func (p *ProkaryoticCell) Mitosis() CellActor {
 
 func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {
 	p.Cell.Oxygenate(oxygenate)
-	if !oxygenate {
+	if oxygenate {
 		p.energy++
 	}
 }
@@ -428,7 +472,7 @@ func (v *Virus) InfectCell(c CellActor) {
 	}
 }
 
-type ImmuneCell struct {
+type Leukocyte struct {
 	Cell
 }
 
@@ -438,7 +482,7 @@ type AntigenPresenting interface {
 	DNA() *DNA
 }
 
-func (i *ImmuneCell) CheckAntigen(c AntigenPresenting) bool {
+func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
 	if c.PresentAntigen(false) == nil ||
 		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
 		fmt.Println("KILL:", c)
@@ -450,13 +494,13 @@ func (i *ImmuneCell) CheckAntigen(c AntigenPresenting) bool {
 }
 
 type TCell struct {
-	ImmuneCell
+	Leukocyte
 	proteinReceptor Protein
 }
 
 func MakeTCell(dna *DNA, proteinReceptor Protein) *TCell {
 	return &TCell{
-		ImmuneCell: ImmuneCell{
+		Leukocyte: Leukocyte{
 			Cell: Cell{
 				cellType: TLymphocyte,
 				dna:      dna,
@@ -478,7 +522,7 @@ func GenerateTCells(dna *DNA) (tCells []*TCell) {
 }
 
 type DendriticCell struct {
-	ImmuneCell
+	Leukocyte
 	proteinSignatures map[Protein]bool
 }
 
@@ -498,7 +542,7 @@ func (d *DendriticCell) FoundMatch(t *TCell) bool {
 
 func MakeDendriticCell(dna *DNA) *DendriticCell {
 	return &DendriticCell{
-		ImmuneCell: ImmuneCell{
+		Leukocyte: Leukocyte{
 			Cell: Cell{
 				cellType: Dendritic,
 				dna:      dna,

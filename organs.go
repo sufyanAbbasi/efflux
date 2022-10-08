@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/ring"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -97,8 +98,8 @@ type TransportRequest struct {
 }
 
 type Edge struct {
-	connection   *websocket.Conn
-	transportUrl string
+	workConnection *websocket.Conn
+	transportUrl   string
 }
 
 func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
@@ -167,16 +168,18 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
-	ctx          context.Context
-	name         string
-	edges        []*Edge
-	serverMux    *http.ServeMux
-	origin       string
-	port         string
-	websocketUrl string
-	transportUrl string
-	managers     map[WorkType]*WorkManager
-	materialPool *MaterialPool
+	ctx              context.Context
+	name             string
+	edges            []*Edge
+	serverMux        *http.ServeMux
+	origin           string
+	port             string
+	websocketUrl     string
+	transportUrl     string
+	managers         map[WorkType]*WorkManager
+	materialPool     *MaterialPool
+	diffusionTracker *ring.Ring
+	world            *World
 }
 
 var currentPort = 7999
@@ -186,7 +189,7 @@ func GetNextAddresses() (string, string, string, string, string) {
 	return ORIGIN,
 		fmt.Sprintf(":%v", currentPort),
 		fmt.Sprintf(URL_TEMPLATE, currentPort),
-		fmt.Sprintf(WEBSOCKET_URL_TEMPLATE, currentPort),
+		fmt.Sprintf(WORK_URL_TEMPLATE, currentPort),
 		fmt.Sprintf(TRANSPORT_URL_TEMPLATE, currentPort)
 }
 
@@ -200,6 +203,20 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 		websocketUrl: websocketUrl,
 		transportUrl: transportUrl,
 		managers:     make(map[WorkType]*WorkManager),
+		world: &World{
+			ctx: ctx,
+			bounds: &Bounds{
+				minX: -100,
+				minY: -100,
+				minZ: -100,
+				maxX: 100,
+				maxY: 100,
+				maxZ: 100,
+			},
+			renderChan:    make(chan chan *Renderable),
+			streamingChan: make(chan struct{}),
+		},
+		diffusionTracker: ring.New(DIFFUSION_TRACKER_BUFFER),
 	}
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
@@ -216,6 +233,9 @@ func (n *Node) Start(ctx context.Context) {
 	n.serverMux.Handle(WORK_ENDPOINT, websocket.Handler(n.ProcessIncomingWorkRequests))
 	n.serverMux.Handle(STATUS_ENDPOINT, websocket.Handler(n.GetNodeStatus))
 	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, n.HandleTransportRequest)
+	if n.world != nil {
+		n.serverMux.Handle(WORLD_ENDPOINT, websocket.Handler(n.world.Stream))
+	}
 
 	go func() {
 		err := http.ListenAndServe(n.port, n.serverMux)
@@ -229,7 +249,7 @@ func (n *Node) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				n.RequestDiffusion()
+				n.SendDiffusion()
 			case <-ctx.Done():
 				return
 			}
@@ -245,8 +265,8 @@ func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transpo
 	n.Lock()
 	defer n.Unlock()
 	n.edges = append(n.edges, &Edge{
-		connection:   connection,
-		transportUrl: transportUrl,
+		workConnection: connection,
+		transportUrl:   transportUrl,
 	})
 	go n.ProcessIncomingWorkResponses(ctx, connection)
 }
@@ -301,7 +321,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 		default:
 			work := ReceiveWork(connection)
 			if n.materialPool != nil && work.workType == diffusion {
-				n.ProcessDiffusionRequest(work)
+				n.ReceiveDiffusion(work)
 				continue
 			}
 			manager, ok := n.managers[work.workType]
@@ -341,7 +361,7 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 	}
 }
 
-func (n *Node) ProcessDiffusionRequest(request Work) {
+func (n *Node) ReceiveDiffusion(request Work) {
 	data := &DiffusionSocketData{}
 	json.Unmarshal([]byte(request.result), data)
 
@@ -352,7 +372,6 @@ func (n *Node) ProcessDiffusionRequest(request Work) {
 		glucose:  data.Resources.Glucose,
 		vitamins: data.Resources.Vitamins,
 	})
-
 	waste := n.materialPool.GetWaste()
 	defer n.materialPool.PutWaste(waste)
 	waste.Add(&WasteBlob{
@@ -372,7 +391,7 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 		case <-ticker.C:
 			var connections []string
 			for _, edge := range n.edges {
-				address := strings.Replace(edge.connection.RemoteAddr().String(), "/work", "/status", 1)
+				address := strings.Replace(edge.workConnection.RemoteAddr().String(), "/work", "", 1)
 				connections = append(connections, address)
 			}
 			var workStatus []WorkStatusData
@@ -433,7 +452,7 @@ func (n *Node) RequestWork(request Work) (result Work) {
 		// fmt.Printf("%v Received Result: %v\n", n, result)
 	default:
 		for _, edge := range n.edges {
-			SendWork(edge.connection, request)
+			SendWork(edge.workConnection, request)
 		}
 	}
 	if result.status == 0 {
@@ -459,35 +478,47 @@ func (n *Node) RequestWork(request Work) (result Work) {
 	return
 }
 
-func (n *Node) RequestDiffusion() {
+func (n *Node) SendDiffusion() {
 	if n.materialPool != nil {
-		if len(n.edges) > 1 {
-			// Pick a random node to diffuse to.
-			edge := n.edges[rand.Intn(len(n.edges))]
-			// Grab a resource and waste blob to diffuse. Can be empty.
-			resource := n.materialPool.GetResource()
-			waste := n.materialPool.GetWaste()
-			diffusionData, err := json.Marshal(DiffusionSocketData{
-				Resources: ResourceBlobData{
-					O2:       resource.o2,
-					Glucose:  resource.glucose,
-					Vitamins: resource.vitamins,
-				},
-				Waste: WasteBlobData{
-					CO2:      waste.co2,
-					Toxins:   waste.toxins,
-					Antigens: []Protein{},
-				},
-			})
-			if err != nil {
-				log.Fatal("Could not send diffusion data: ", err)
-			}
-			SendWork(edge.connection, Work{
-				workType: diffusion,
-				result:   string(diffusionData),
-				status:   0,
-			})
+		if len(n.edges) == 0 {
+			return
 		}
+		edge := n.edges[rand.Intn(len(n.edges))]
+		if len(n.edges) > 1 {
+			tries := DIFFUSION_TRACKER_BUFFER
+			prev := n.diffusionTracker.Prev()
+			for prev.Value != nil && edge != prev.Value.(*Edge) && tries > 0 {
+				edge = n.edges[rand.Intn(len(n.edges))]
+				prev = n.diffusionTracker.Prev()
+				tries--
+			}
+		}
+
+		// Grab a resource and waste blob to diffuse. Can be empty.
+		resource := n.materialPool.GetResource()
+		waste := n.materialPool.GetWaste()
+		diffusionData, err := json.Marshal(DiffusionSocketData{
+			Resources: ResourceBlobData{
+				O2:       resource.o2,
+				Glucose:  resource.glucose,
+				Vitamins: resource.vitamins,
+			},
+			Waste: WasteBlobData{
+				CO2:      waste.co2,
+				Toxins:   waste.toxins,
+				Antigens: []Protein{},
+			},
+		})
+		if err != nil {
+			log.Fatal("Could not send diffusion data: ", err)
+		}
+		SendWork(edge.workConnection, Work{
+			workType: diffusion,
+			result:   string(diffusionData),
+			status:   0,
+		})
+		n.diffusionTracker.Value = edge
+		n.diffusionTracker = n.diffusionTracker.Next()
 	}
 }
 
