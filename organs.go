@@ -215,6 +215,10 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 			},
 			renderChan:    make(chan chan *Renderable),
 			streamingChan: make(chan struct{}),
+			rootMatrix: &ExtracellularMatrix{
+				RWMutex:  sync.RWMutex{},
+				attached: []*Renderable{},
+			},
 		},
 		diffusionTracker: ring.New(DIFFUSION_TRACKER_BUFFER),
 	}
