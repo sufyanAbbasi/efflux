@@ -4,7 +4,6 @@ import (
 	"container/ring"
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -230,47 +229,19 @@ func (w *World) Stream(connection *websocket.Conn) {
 	}
 }
 
-type ExtracellularMatrixType int
-
-const (
-	BloodVesselMatrix ExtracellularMatrixType = iota
-	BrainMatrix
-	HeartMatrix
-	LungMatrix
-	MuscleMatrix
-	SkinMatrix
-	GutMatrix
-)
-
 type ExtracellularMatrix struct {
 	sync.RWMutex
-	render         *Renderable
-	attached       []*Renderable
-	capacity       int
-	renderStrategy func(*ExtracellularMatrix, int, *Renderable) *Renderable
-	buildNext      func(*ExtracellularMatrix) *ExtracellularMatrix
-	next           *ExtracellularMatrix
+	attached []*Renderable
 }
 
 func (m *ExtracellularMatrix) Render(renderChan chan *Renderable) {
-	renderChan <- m.render
-	for i, attached := range m.attached {
-		renderChan <- m.renderStrategy(m, i, attached)
+	for _, attached := range m.attached {
+		renderChan <- attached
 	}
-	if m.next == nil {
-		close(renderChan)
-	} else {
-		m.next.Render(renderChan)
-	}
+	close(renderChan)
 }
 
 func (m *ExtracellularMatrix) Attach(r *Renderable) func() {
-	if len(m.attached) >= m.capacity {
-		if m.next == nil {
-			m.next = m.buildNext(m)
-		}
-		return m.next.Attach(r)
-	}
 	m.Lock()
 	defer m.Unlock()
 	for i, attached := range m.attached {
@@ -293,92 +264,4 @@ func (m *ExtracellularMatrix) Detach(i int) {
 		m.attached[i] = nil
 	}
 	m.Unlock()
-}
-
-func BloodRenderStrategy(m *ExtracellularMatrix, i int, r *Render) *Render {
-	centerX := m.render.render.x
-	centerY := m.render.render.y
-	centerZ := m.render.render.z
-
-	halfLength := float32(5)
-
-
-	return r
-}
-
-func BrainRenderStrategy(m *ExtracellularMatrix, i int, r *Render) *Render {
-	// Modeled on an origin-centered regular icosahedron of edge length 2:
-	// (0, ±1, ±φ)
-	// (±1, ±φ, 0)
-	// (±φ, 0, ±1)
-	// where φ=(1+√5)/2 is the Golden Ratio.
-
-	centerX := m.render.render.x
-	centerY := m.render.render.y
-	centerZ := m.render.render.z
-
-	rX := r.x
-	rY := r.y
-	rZ := r.z
-
-	i = i + 1
-	if i <= 4 {
-		switch i % 4 {
-		case 0:
-			r.MoveX(centerX + 0 - rX)
-			r.MoveY(centerY + 1 - rY)
-			r.MoveZ(centerZ + math.Phi - rZ)
-		case 1:
-			r.MoveX(centerX + 0 - rX)
-			r.MoveY(centerY + 1 - rY)
-			r.MoveZ(centerZ - math.Phi - rZ)
-		case 2:
-			r.MoveX(centerX + 0 - rX)
-			r.MoveY(centerY - 1 - rY)
-			r.MoveZ(centerZ + math.Phi - rZ)
-		case 3:
-			r.MoveX(centerX + 0 - rX)
-			r.MoveY(centerY - 1 - rY)
-			r.MoveZ(centerZ - math.Phi - rZ)
-		}
-	} else if i <= 8 {
-		switch i % 4 {
-		case 0:
-			r.MoveX(centerX + 1 - rX)
-			r.MoveY(centerY + math.Phi - rY)
-			r.MoveZ(centerZ + 0 - rZ)
-		case 1:
-			r.MoveX(centerX + 1 - rX)
-			r.MoveY(centerY - math.Phi - rY)
-			r.MoveZ(centerZ + 0 - rZ)
-		case 2:
-			r.MoveX(centerX - 1 - rX)
-			r.MoveY(centerY + math.Phi - rY)
-			r.MoveZ(centerZ + math.Phi - rZ)
-		case 3:
-			r.MoveX(centerX - 1 - rX)
-			r.MoveY(centerY - math.Phi - rY)
-			r.MoveZ(centerZ + 0 - rZ)
-		}
-	} else if i <= 12 {
-		switch i % 4 {
-		case 0:
-			r.MoveX(centerX + math.Phi - rX)
-			r.MoveY(centerY + 0 - rY)
-			r.MoveZ(centerZ + 1 - rZ)
-		case 1:
-			r.MoveX(centerX + math.Phi - rX)
-			r.MoveY(centerY + 0 - rY)
-			r.MoveZ(centerZ - 1 - rZ)
-		case 2:
-			r.MoveX(centerX - math.Phi - rX)
-			r.MoveY(centerY + 0 - rY)
-			r.MoveZ(centerZ + 1 - rZ)
-		case 3:
-			r.MoveX(centerX - math.Phi - rX)
-			r.MoveY(centerY + 0 - rY)
-			r.MoveZ(centerZ - 1 - rZ)
-		}
-	}
-	return r
 }
