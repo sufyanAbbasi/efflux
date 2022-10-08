@@ -29,11 +29,19 @@ func (r *ResourceBlob) Consume(need *ResourceBlob) {
 		r.vitamins = 0
 		need.vitamins -= r.vitamins
 	}
+	if r.glucose >= need.glucose {
+		r.glucose -= need.glucose
+		need.glucose = 0
+	} else {
+		r.glucose = 0
+		need.glucose -= r.glucose
+	}
 }
 
 func (r *ResourceBlob) Add(resource *ResourceBlob) {
 	r.o2 += resource.o2
 	r.vitamins += resource.vitamins
+	r.glucose += resource.glucose
 }
 
 type WasteBlob struct {
