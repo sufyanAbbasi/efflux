@@ -261,12 +261,6 @@ class Render {
             x,
             y,
             z,
-            rx,
-            ry,
-            rz,
-            sx,
-            sy,
-            sz,
             color,
             geometry,
         } = renderData;
@@ -287,9 +281,7 @@ class Render {
         }
         el.object3D.visible = visible;
         el.object3D.position.set(x, y, z)
-        el.object3D.rotation.set(rx, ry, rz)
-        el.object3D.scale.set(sx, sy, sz);
-        el.setAttribute('color', color || 'red');
+        el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
     }
 }
 
