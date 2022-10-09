@@ -213,8 +213,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 				maxY: 100,
 				maxZ: 100,
 			},
-			renderChan:    make(chan chan *Renderable),
-			streamingChan: make(chan struct{}),
+			streamingChan: make(chan chan *Renderable),
 			rootMatrix: &ExtracellularMatrix{
 				RWMutex:  sync.RWMutex{},
 				attached: []*Renderable{},
@@ -225,6 +224,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
 	node.Start(ctx)
+	go node.world.Start(ctx)
 	return node
 }
 
