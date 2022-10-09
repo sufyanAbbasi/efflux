@@ -1,11 +1,9 @@
 package main
 
 import (
-	"container/ring"
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -31,56 +29,11 @@ type RenderData struct {
 	Geometry string   `json:"geometry"`
 }
 
-type RenderCache struct {
-	sync.RWMutex
-	changedX, changedY, changedZ,
-	changedVisible, changedColor, changedGeometry bool
-	connectionBuffer *ring.Ring
-	TTL              time.Duration
-	lastResetTime    time.Time
-}
-
-func (r *RenderCache) Reset() {
-	r.changedX = false
-	r.changedY = false
-	r.changedZ = false
-	r.changedVisible = false
-	r.changedColor = false
-	r.changedGeometry = false
-}
-
-func (r *RenderCache) Report(conn *websocket.Conn) bool {
-	n := r.connectionBuffer.Len()
-	found := false
-	curr := r.connectionBuffer
-	for i := 0; i < n; i++ {
-		if conn == curr.Value.(*websocket.Conn) {
-			found = true
-		}
-		curr = curr.Prev()
-	}
-	r.Lock()
-	if !found {
-		r.connectionBuffer.Value = conn
-		r.connectionBuffer = r.connectionBuffer.Next()
-	}
-	r.Unlock()
-	r.Lock()
-	now := time.Now()
-	if r.lastResetTime.Add(r.TTL).After(now) {
-		r.Reset()
-		r.lastResetTime = now
-	}
-	r.Unlock()
-	return found
-}
-
 type Render struct {
-	visible     bool
-	x, y, z     float32
-	color       uint32
-	geometry    string
-	renderCache *RenderCache
+	visible  bool
+	x, y, z  float32
+	color    uint32
+	geometry string
 }
 
 func (r *Render) MoveX(x float32) {
@@ -88,9 +41,6 @@ func (r *Render) MoveX(x float32) {
 		return
 	}
 	r.x += x
-	r.renderCache.Lock()
-	r.renderCache.changedX = true
-	r.renderCache.Unlock()
 }
 
 func (r *Render) MoveY(y float32) {
@@ -98,9 +48,6 @@ func (r *Render) MoveY(y float32) {
 		return
 	}
 	r.y += y
-	r.renderCache.Lock()
-	r.renderCache.changedY = true
-	r.renderCache.Unlock()
 }
 
 func (r *Render) MoveZ(z float32) {
@@ -108,52 +55,29 @@ func (r *Render) MoveZ(z float32) {
 		return
 	}
 	r.z += z
-	r.renderCache.Lock()
-	r.renderCache.changedZ = true
-	r.renderCache.Unlock()
 }
 
 func (r *Render) ChangeColor(color uint32) {
 	r.color = color
-	r.renderCache.Lock()
-	r.renderCache.changedColor = true
-	r.renderCache.Unlock()
 }
 
 func (r *Render) ChangeGeometry(geometry string) {
 	r.geometry = geometry
-	r.renderCache.Lock()
-	r.renderCache.changedGeometry = true
-	r.renderCache.Unlock()
 }
 
 func (r *Render) SetVisible(visible bool) {
 	r.visible = visible
-	r.renderCache.Lock()
-	r.renderCache.changedVisible = true
-	r.renderCache.Unlock()
 }
 
-func (r *Render) RenderDiff(renderId RenderID, conn *websocket.Conn) RenderData {
+func (r *Render) RenderData(renderId RenderID) RenderData {
 	renderData := RenderData{
-		Id:      renderId,
-		Visible: r.visible,
-	}
-	fullRender := r.renderCache.Report(conn)
-	if fullRender || r.renderCache.changedX {
-		renderData.X = r.x
-	}
-	if fullRender || r.renderCache.changedY {
-		renderData.Y = r.y
-	}
-	if fullRender || r.renderCache.changedZ {
-		renderData.Z = r.z
-	}
-	if fullRender || r.renderCache.changedColor {
-		renderData.Color = r.color
-	}
-	if fullRender || r.renderCache.changedGeometry {
-		renderData.Geometry = r.geometry
+		Id:       renderId,
+		Visible:  r.visible,
+		X:        r.x,
+		Y:        r.y,
+		Z:        r.z,
+		Color:    r.color,
+		Geometry: r.geometry,
 	}
 	return renderData
 }
@@ -182,8 +106,7 @@ func (r *Render) ConstrainBounds(b *Bounds) {
 type World struct {
 	ctx           context.Context
 	bounds        *Bounds
-	renderChan    chan chan *Renderable
-	streamingChan chan struct{}
+	streamingChan chan chan *Renderable
 	rootMatrix    *ExtracellularMatrix
 }
 
@@ -193,17 +116,11 @@ func (w *World) Attach(r *Renderable) func() {
 
 func (w *World) Start(ctx context.Context) {
 	for {
-		if w.rootMatrix != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-w.streamingChan:
-				renderChan := make(chan *Renderable)
-				go w.rootMatrix.Render(renderChan)
-				w.renderChan <- renderChan
-			}
-		} else {
+		select {
+		case <-ctx.Done():
 			return
+		case r := <-w.streamingChan:
+			go w.rootMatrix.Render(r)
 		}
 	}
 }
@@ -214,12 +131,13 @@ func (w *World) Stream(connection *websocket.Conn) {
 		select {
 		case <-w.ctx.Done():
 			return
-		case w.streamingChan <- struct{}{}:
-		case renderables := <-w.renderChan:
-			for renderable := range renderables {
+		default:
+			r := make(chan *Renderable)
+			w.streamingChan <- r
+			for renderable := range r {
 				render := renderable.render
 				render.ConstrainBounds(w.bounds)
-				err := websocket.JSON.Send(connection, render.RenderDiff(renderable.id, connection))
+				err := websocket.JSON.Send(connection, render.RenderData(renderable.id))
 				if err != nil {
 					fmt.Println(err)
 					return

@@ -179,7 +179,7 @@ class Node {
             scene = document.createElement('a-scene');
             scene.setAttribute('embedded');
             const sky = document.createElement('a-sky');
-            sky.setAttribute('color', 'white');
+            sky.setAttribute('color', 'black');
             scene.appendChild(sky);
             renderContainer.appendChild(scene);
         }
@@ -197,7 +197,7 @@ class Node {
         // May be called multiple times.
         const elements = document.querySelectorAll('.cell');
         for (const el of elements) {
-            el.parent.removeChild();
+            el.parent?.removeChild();
         }
         const closeButtons = document.querySelectorAll('.close');
         closeButtons.forEach((d) => d.remove())
@@ -261,12 +261,6 @@ class Render {
             x,
             y,
             z,
-            rx,
-            ry,
-            rz,
-            sx,
-            sy,
-            sz,
             color,
             geometry,
         } = renderData;
@@ -287,9 +281,7 @@ class Render {
         }
         el.object3D.visible = visible;
         el.object3D.position.set(x, y, z)
-        el.object3D.rotation.set(rx, ry, rz)
-        el.object3D.scale.set(sx, sy, sz);
-        el.setAttribute('color', color || 'red');
+        el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
     }
 }
 
