@@ -262,26 +262,28 @@ class Render {
             y,
             z,
             color,
-            geometry,
         } = renderData;
         // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
         let el = document.querySelector(`#${id}`);
         if (!el) {
-            switch(geometry) {
-                case "sphere":
-                    el = document.createElement('a-sphere');
-                    break;
-                default:        
-                    el = document.createElement('a-sphere');
-            }
-            el.classList.add('cell');
-            el.setAttribute('id', `${id}`);
-            el.setAttribute('radius', 0.25);
+            const container = document.createElement('div');
+            render(html`
+                <a-sphere
+                    id="${id}"
+                    class="cell"
+                    radius="0.25"
+                    color="${color ? `#${Number(color).toString(16)}` : 'red'}"
+                    position="${x} ${y} ${z}">
+                </a-sphere>
+            `, container);
+            el = container.firstElementChild;
             document.querySelector('a-scene')?.appendChild(el);
         }
-        el.object3D.visible = visible;
-        el.object3D.position.set(x, y, z)
-        el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
+        if (el.object3D) {
+            el.object3D.visible = visible;
+            el.object3D.position.set(x, y, z)
+            el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
+        }
     }
 }
 
