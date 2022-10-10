@@ -1,3 +1,5 @@
+import {html, render} from 'https://unpkg.com/lit-html?module';
+
 const NodeMap = new Map();
 
 const cy = cytoscape({
@@ -158,39 +160,39 @@ class Node {
     }
 
     renderOption() {
-        const option = document.createElement('option');
-        option.setAttribute('value', `#${this.id}`);
-        option.textContent = this.name;
+        const container = document.createElement('div');
+        render(html`<option value="#${this.id}">
+            ${this.name}
+        </option>`, container);
         let optgroup = document.querySelector('optgroup[label="Organs"]');
         for (let findOptGroup of document.querySelectorAll('optgroup')) {
             if (this.name.indexOf(findOptGroup.getAttribute('label')) > -1) {
                 optgroup = findOptGroup;
             }
         }
-        optgroup.appendChild(option)
+        optgroup.appendChild(container.firstElementChild);
     }
 
     renderScene() {
         this.collapseScene();
         const renderContainer = document.querySelector('.render')
         renderContainer.classList.add('show')
-        let scene = document.querySelector('a-scene');
+        let scene = document.querySelector('.render a-scene');
         if (!scene) {
-            scene = document.createElement('a-scene');
-            scene.setAttribute('embedded');
-            const sky = document.createElement('a-sky');
-            sky.setAttribute('color', 'black');
-            scene.appendChild(sky);
-            renderContainer.appendChild(scene);
+            render(html`<a-scene embedded>
+                    <a-assets>
+                    <img id="sky" src="phagocytosis.jpg">
+                </a-assets>
+                <a-sky src="#sky"></a-sky>
+                <a-entity id="rig" position="-1 -1 -1">
+                    <a-camera id="camera"></a-camera>
+                </a-entity>
+            </a-scene>
+            <button class="close" @click="${() => {
+                this.collapseScene();
+            }}">Close</button>`, renderContainer);
         }
         this.render = new Render(this);
-        const closeButton = document.createElement('button')
-        closeButton.textContent = 'Close';
-        closeButton.classList.add('close');
-        closeButton.addEventListener('click', () => {
-            this.collapseScene();
-        })
-        renderContainer.appendChild(closeButton);
     }
 
     collapseScene() {
@@ -199,8 +201,6 @@ class Node {
         for (const el of elements) {
             el.parent?.removeChild();
         }
-        const closeButtons = document.querySelectorAll('.close');
-        closeButtons.forEach((d) => d.remove())
         const renderContainer = document.querySelector('.render')
         renderContainer.classList.remove('show')
         this.render?.socket?.close();
@@ -262,26 +262,28 @@ class Render {
             y,
             z,
             color,
-            geometry,
         } = renderData;
         // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
         let el = document.querySelector(`#${id}`);
         if (!el) {
-            switch(geometry) {
-                case "sphere":
-                    el = document.createElement('a-sphere');
-                    break;
-                default:        
-                    el = document.createElement('a-sphere');
-            }
-            el.classList.add('cell');
-            el.setAttribute('id', `${id}`);
-            el.setAttribute('radius', 0.25);
+            const container = document.createElement('div');
+            render(html`
+                <a-sphere
+                    id="${id}"
+                    class="cell"
+                    radius="0.25"
+                    color="${color ? `#${Number(color).toString(16)}` : 'red'}"
+                    position="${x} ${y} ${z}">
+                </a-sphere>
+            `, container);
+            el = container.firstElementChild;
             document.querySelector('a-scene')?.appendChild(el);
         }
-        el.object3D.visible = visible;
-        el.object3D.position.set(x, y, z)
-        el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
+        if (el.object3D) {
+            el.object3D.visible = visible;
+            el.object3D.position.set(x, y, z)
+            el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
+        }
     }
 }
 
