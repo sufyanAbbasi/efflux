@@ -22,6 +22,7 @@ const (
 	Myocyte       // Muscle Cell
 	Keratinocyte  // Skin Cell
 	Enterocyte    // Gut Lining Cell
+	Podocyte      // Kidney Cell
 	TLymphocyte   // T Cell
 	Dendritic     // Dendritic Cells
 )
@@ -46,6 +47,8 @@ func (c CellType) String() string {
 		return "Keratinocyte"
 	case Enterocyte:
 		return "Enterocyte"
+	case Podocyte:
+		return "Podocyte"
 	case TLymphocyte:
 		return "TLymphocyte"
 	case Dendritic:
@@ -61,7 +64,7 @@ type Cell struct {
 	mhc_i        MHC_I
 	antigen      *Antigen
 	workType     WorkType
-	parent       *Node
+	organ        *Node
 	resourceNeed *ResourceBlob
 	damage       int
 	function     *StateDiagram
@@ -75,12 +78,12 @@ func (c *Cell) String() string {
 	return fmt.Sprintf("%v (%v)", c.cellType, c.dna.name)
 }
 
-func (c *Cell) Parent() *Node {
-	return c.parent
+func (c *Cell) Organ() *Node {
+	return c.organ
 }
 
-func (c *Cell) SetParent(node *Node) {
-	c.parent = node
+func (c *Cell) SetOrgan(node *Node) {
+	c.organ = node
 }
 
 func (c *Cell) DNA() *DNA {
@@ -129,7 +132,7 @@ func (c *Cell) IncurDamage(damage int) {
 }
 
 func (c *Cell) Apoptosis() {
-	c.parent = nil
+	c.organ = nil
 	if c.detach != nil {
 		c.detach()
 	}
@@ -139,7 +142,8 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	if request.workType != c.workType {
 		log.Fatalf("Cell %v is unable to perform work: %v", c, request)
 	}
-	if c.parent.materialPool != nil && !c.CollectResources(ctx) {
+	if c.organ.materialPool != nil && !c.CollectResources(ctx) {
+		fmt.Println("Not enough resources:", c, "in", c.organ)
 		request.status = 503
 		request.result = "Not enough resources."
 		return request
@@ -147,30 +151,45 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	c.Lock()
 	switch c.cellType {
 	case RedBlood:
-		waste := c.parent.materialPool.GetWaste()
+		waste := c.organ.materialPool.GetWaste()
 		waste.co2 += 6
-		c.parent.materialPool.PutWaste(waste)
-		resource := c.parent.materialPool.GetResource()
+		c.organ.materialPool.PutWaste(waste)
+		resource := c.organ.materialPool.GetResource()
 		if resource.o2 <= 6 {
 			resource.o2 = 0
 		} else {
 			resource.o2 -= 6
 		}
-		c.parent.materialPool.PutResource(resource)
+		c.organ.materialPool.PutResource(resource)
 		request.status = 200
 		request.result = "Completed."
 	case Enterocyte:
 		for i := 0; i < GLUCOSE_INTAKE/6; i++ {
-			resource := c.parent.materialPool.GetResource()
+			resource := c.organ.materialPool.GetResource()
 			resource.glucose += 6
-			c.parent.materialPool.PutResource(resource)
+			c.organ.materialPool.PutResource(resource)
 		}
 		request.status = 200
 		request.result = "Completed."
+	case Podocyte:
+		waste := c.organ.materialPool.GetWaste()
+		if waste.toxins <= 10 {
+			waste.toxins = 0
+		} else {
+			waste.toxins -= 10
+		}
+		c.organ.materialPool.PutWaste(waste)
+		request.status = 200
+		request.result = "Completed."
 	case Pneumocyte:
-		// 6 CO2 will be removed at destination
-		// 6 O2 added at destination
-		fallthrough
+		waste := c.organ.materialPool.GetWaste()
+		waste.co2 = 0
+		c.organ.materialPool.PutWaste(waste)
+		resource := c.organ.materialPool.GetResource()
+		resource.o2 += 100
+		c.organ.materialPool.PutResource(resource)
+		request.status = 200
+		request.result = "Completed."
 	case Keratinocyte:
 		fallthrough
 	case Neuron:
@@ -211,9 +230,9 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 		case <-ctx.Done():
 			return false
 		default:
-			resource := c.parent.materialPool.GetResource()
-			defer c.parent.materialPool.PutResource(resource)
+			resource := c.organ.materialPool.GetResource()
 			resource.Consume(c.resourceNeed)
+			c.organ.materialPool.PutResource(resource)
 		}
 	}
 	c.ResetResourceNeed()
@@ -228,34 +247,34 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Enterocyte:
 		fallthrough
+	case Podocyte:
+		fallthrough
 	case RedBlood:
 		c.resourceNeed = &ResourceBlob{
-			o2: 0,
-		}
-	case Neuron:
-		c.resourceNeed = &ResourceBlob{
-			o2: 6,
-			// glucose: 6,
+			o2:      0,
+			glucose: 0,
 		}
 	case Bacteroidota:
 		c.resourceNeed = &ResourceBlob{
 			o2:      6,
 			glucose: 60,
 		}
+	case Neuron:
+		fallthrough
 	case Cardiomyocyte:
 		fallthrough
 	case Myocyte:
 		fallthrough
 	default:
 		c.resourceNeed = &ResourceBlob{
-			o2: 6,
-			// glucose: 6,
+			o2:      6,
+			glucose: 6,
 		}
 	}
 }
 
 func (c *Cell) ProduceWaste() {
-	if c.parent.materialPool != nil {
+	if c.organ.materialPool != nil {
 		switch c.cellType {
 		case Pneumocyte:
 			fallthrough
@@ -263,25 +282,28 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Enterocyte:
 			fallthrough
+		case Podocyte:
+			fallthrough
 		case RedBlood:
 			// No waste produced.
 		case Bacteroidota:
-			waste := c.parent.materialPool.GetWaste()
+			waste := c.organ.materialPool.GetWaste()
 			waste.co2 += 6
-			c.parent.materialPool.PutWaste(waste)
-			resource := c.Parent().materialPool.GetResource()
+			c.organ.materialPool.PutWaste(waste)
+			resource := c.Organ().materialPool.GetResource()
 			resource.vitamins += 60
-			c.Parent().materialPool.PutResource(resource)
-		case Neuron:
-			fallthrough
+			c.Organ().materialPool.PutResource(resource)
 		case Cardiomyocyte:
 			fallthrough
 		case Myocyte:
 			fallthrough
+		case Neuron:
+			fallthrough
 		default:
-			waste := c.parent.materialPool.GetWaste()
+			waste := c.organ.materialPool.GetWaste()
+			waste.toxins += 1
 			waste.co2 += 6
-			c.parent.materialPool.PutWaste(waste)
+			c.organ.materialPool.PutWaste(waste)
 		}
 	}
 }
@@ -295,7 +317,7 @@ func (c *Cell) Render() {
 			geometry: "sphere",
 		},
 	}
-	c.detach = c.parent.world.Attach(c.render)
+	c.detach = c.organ.world.Attach(c.render)
 }
 
 type EukaryoticCell struct {
@@ -328,28 +350,29 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 	e.hasTelomerase = false
 	e.telomereLength--
 	cell := MakeEukaryoticStemCell(e.dna, e.cellType, e.workType)
-	cell.parent = e.parent
+	cell.organ = e.organ
 	cell.telomereLength = e.telomereLength
 	cell.hasTelomerase = false
-	if e.parent != nil {
-		e.parent.AddWorker(cell)
+	if e.organ != nil {
+		e.organ.AddWorker(cell)
 	}
-	fmt.Println("Spawned:", cell, "in", cell.parent)
+	fmt.Println("Spawned:", cell, "in", cell.organ)
 	return CellActor(cell)
 }
 
 func (e *EukaryoticCell) Apoptosis() {
 	e.Cell.Apoptosis()
-	if e.parent != nil {
-		e.parent.RemoveWorker(e)
+	if e.organ != nil {
+		e.organ.RemoveWorker(e)
 	}
 	// TODO: make sure this gets garbage collected.
 }
 
-func (e *EukaryoticCell) ShouldMitosis() bool {
-	ligand := e.Parent().materialPool.GetLigand()
-	defer e.Parent().materialPool.PutLigand(ligand)
+func (e *EukaryoticCell) WillMitosis() bool {
+	ligand := e.Organ().materialPool.GetLigand()
+	defer e.Organ().materialPool.PutLigand(ligand)
 	if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
+		// Only checked if prior conditions are met.
 		ligand.growth -= LIGAND_GROWTH_THRESHOLD
 		return true
 	}
@@ -359,6 +382,8 @@ func (e *EukaryoticCell) ShouldMitosis() bool {
 func (e *EukaryoticCell) IsAerobic() bool {
 	switch e.cellType {
 	case Pneumocyte:
+		fallthrough
+	case Podocyte:
 		fallthrough
 	case Keratinocyte:
 		return false
@@ -417,7 +442,7 @@ func (p *ProkaryoticCell) HasTelomerase() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) ShouldMitosis() bool {
+func (p *ProkaryoticCell) WillMitosis() bool {
 	if time.Now().After(p.lastGenerationTime.Add(p.generationTime)) && p.energy >= BACTERIA_ENERGY_MITOSIS_THRESHOLD {
 		p.energy = 0
 		return true
@@ -428,8 +453,8 @@ func (p *ProkaryoticCell) ShouldMitosis() bool {
 func (p *ProkaryoticCell) Mitosis() CellActor {
 	p.lastGenerationTime = time.Now()
 	cell := MakeProkaryoticCell(p.dna, p.cellType)
-	cell.parent = p.parent
-	fmt.Println("Spawned:", cell, "in", cell.parent)
+	cell.organ = p.organ
+	fmt.Println("Spawned:", cell, "in", cell.organ)
 	return CellActor(cell)
 }
 

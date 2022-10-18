@@ -28,7 +28,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				return
 			case <-ticker.C:
 				if s.current != nil {
-					if checkParentOrDie(ctx, cell) && s.current.function != nil {
+					if hasOrganOrDie(ctx, cell) && s.current.function != nil {
 						if !s.current.function.Run(ctx, cell) {
 							cancel()
 						}
@@ -58,10 +58,10 @@ type CellActor interface {
 	AntigenPresenting
 	CellType() CellType
 	Start(context.Context)
-	Parent() *Node
+	Organ() *Node
 	Function() *StateDiagram
 	HasTelomerase() bool
-	ShouldMitosis() bool
+	WillMitosis() bool
 	Mitosis() CellActor
 	CollectResources(context.Context) bool
 	ProduceWaste()
@@ -93,8 +93,8 @@ func (p *ProteinFunction) Run(ctx context.Context, cell CellActor) bool {
 
 // General Actions
 
-func checkParentOrDie(ctx context.Context, cell CellActor) bool {
-	if cell.Parent() == nil {
+func hasOrganOrDie(ctx context.Context, cell CellActor) bool {
+	if cell.Organ() == nil {
 		fmt.Printf("Force killed: %v\n", cell)
 		return Apoptosis(ctx, cell)
 	}
@@ -102,10 +102,7 @@ func checkParentOrDie(ctx context.Context, cell CellActor) bool {
 }
 
 func DoWork(ctx context.Context, cell CellActor) bool {
-	if !cell.IsAerobic() || cell.IsOxygenated() {
-		cell.Parent().MakeAvailable(cell)
-		cell.Oxygenate(false)
-	}
+	cell.Organ().MakeAvailable(cell)
 	return true
 }
 
@@ -118,10 +115,10 @@ func StemCellToSpecializedCell(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func ShouldMitosisAndRepair(ctx context.Context, cell CellActor) bool {
+func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	// Not all cells can repair, but for the sake of this simulation, they can.
-	resource := cell.Parent().materialPool.GetResource()
-	defer cell.Parent().materialPool.PutResource(resource)
+	resource := cell.Organ().materialPool.GetResource()
+	defer cell.Organ().materialPool.PutResource(resource)
 	if cell.Damage() > 0 {
 		repair := resource.vitamins
 		if resource.vitamins >= cell.Damage() {
@@ -134,11 +131,11 @@ func ShouldMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	// Also not all cells can reproduce, but for sake of simulation, they can.
 	// Three conditions for mitosis, to prevent runaway growth:
 	// - No damage on the cell
-	// - Enough growth ligand (signal)
 	// - Enough vitamin resources
+	// - Enough growth ligand (signal)
 	if cell.Damage() <= DAMAGE_MITOSIS_THRESHOLD &&
 		resource.vitamins >= VITAMIN_COST_MITOSIS &&
-		cell.ShouldMitosis() {
+		cell.WillMitosis() {
 		resource.vitamins -= VITAMIN_COST_MITOSIS
 		c := cell.Mitosis()
 		c.Start(ctx)
@@ -147,8 +144,8 @@ func ShouldMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 }
 
 func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
-	waste := cell.Parent().materialPool.GetWaste()
-	defer cell.Parent().materialPool.PutWaste(waste)
+	waste := cell.Organ().materialPool.GetWaste()
+	defer cell.Organ().materialPool.PutWaste(waste)
 	if waste.toxins >= TOXINS_THRESHOLD {
 		cell.IncurDamage(1)
 	}
@@ -170,69 +167,77 @@ func Apoptosis(ctx context.Context, cell CellActor) bool {
 
 func Respirate(ctx context.Context, cell CellActor) bool {
 	// Receive a unit of 02 for a unit of CO2
-	request := cell.Parent().RequestWork(Work{
+	request := cell.Organ().RequestWork(Work{
 		workType: inhale,
 	})
 	if request.status == 200 {
-		resource := cell.Parent().materialPool.GetResource()
-		defer cell.Parent().materialPool.PutResource(resource)
+		resource := cell.Organ().materialPool.GetResource()
+		defer cell.Organ().materialPool.PutResource(resource)
 		resource.o2 += 6
-		waste := cell.Parent().materialPool.GetWaste()
-		defer cell.Parent().materialPool.PutWaste(waste)
+		waste := cell.Organ().materialPool.GetWaste()
+		defer cell.Organ().materialPool.PutWaste(waste)
 		if waste.co2 > 6 {
 			waste.co2 -= 6
 		} else {
 			waste.co2 = 0
 		}
-		cell.Oxygenate(true)
 	}
 	return true
 }
 
 func Expirate(ctx context.Context, cell CellActor) bool {
 	// Exchange a unit of C02 for a unit of O2
-	request := cell.Parent().RequestWork(Work{
+	request := cell.Organ().RequestWork(Work{
 		workType: exhale,
 	})
 	if request.status == 200 {
-		waste := cell.Parent().materialPool.GetWaste()
-		defer cell.Parent().materialPool.PutWaste(waste)
+		waste := cell.Organ().materialPool.GetWaste()
+		defer cell.Organ().materialPool.PutWaste(waste)
 		if waste.co2 <= 6 {
 			waste.co2 = 0
 		} else {
 			waste.co2 -= 6
 		}
 
-		resource := cell.Parent().materialPool.GetResource()
-		defer cell.Parent().materialPool.PutResource(resource)
+		resource := cell.Organ().materialPool.GetResource()
+		defer cell.Organ().materialPool.PutResource(resource)
 		resource.o2 += 6
-		cell.Oxygenate(true)
+	}
+	return true
+}
+
+func Filtrate(ctx context.Context, cell CellActor) bool {
+	// Remove some amount of toxins.
+	request := cell.Organ().RequestWork(Work{
+		workType: filter,
+	})
+	if request.status == 200 {
+		waste := cell.Organ().materialPool.GetWaste()
+		defer cell.Organ().materialPool.PutWaste(waste)
+		if waste.toxins <= 10 {
+			waste.toxins = 0
+		} else {
+			waste.toxins -= 10
+		}
 	}
 	return true
 }
 
 func MuscleFindFood(ctx context.Context, cell CellActor) bool {
-	request := cell.Parent().RequestWork(Work{
+	request := cell.Organ().RequestWork(Work{
 		workType: think,
 	})
 	if request.status == 200 {
 		// Successfully found a food unit.
-		cell.Parent().RequestWork(Work{
+		cell.Organ().RequestWork(Work{
 			workType: digest,
 		})
 	}
-	if rand.Intn(3) == 0 {
-		// Successfully found a food unit.
-		cell.Parent().RequestWork(Work{
-			workType: digest,
-		})
-	}
-
 	return true
 }
 
 func MuscleSeekSkinProtection(ctx context.Context, cell CellActor) bool {
-	cell.Parent().RequestWork(Work{
+	cell.Organ().RequestWork(Work{
 		workType: cover,
 	})
 	return true
@@ -241,17 +246,17 @@ func MuscleSeekSkinProtection(ctx context.Context, cell CellActor) bool {
 func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	// Check resources in the brain. If not enough,
 	// stimulate muscle movements.
-	resource := cell.Parent().materialPool.GetResource()
-	defer cell.Parent().materialPool.PutResource(resource)
+	resource := cell.Organ().materialPool.GetResource()
+	defer cell.Organ().materialPool.PutResource(resource)
 	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD {
 		// If vitamin levels are low, move more.
-		cell.Parent().RequestWork(Work{
+		cell.Organ().RequestWork(Work{
 			workType: move,
 		})
 	}
 	if resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
 		// If glocose levels are low, move more.
-		cell.Parent().RequestWork(Work{
+		cell.Organ().RequestWork(Work{
 			workType: move,
 		})
 	}
@@ -259,7 +264,7 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 }
 
 func BrainRequestPump(ctx context.Context, cell CellActor) bool {
-	cell.Parent().RequestWork(Work{
+	cell.Organ().RequestWork(Work{
 		workType: pump,
 	})
 	return true
@@ -267,8 +272,8 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 
 func Flatulate(ctx context.Context, cell CellActor) bool {
 	// Manage CO2 levels by leaking it.
-	waste := cell.Parent().materialPool.GetWaste()
-	defer cell.Parent().materialPool.PutWaste(waste)
+	waste := cell.Organ().materialPool.GetWaste()
+	defer cell.Organ().materialPool.PutWaste(waste)
 	waste.co2 = 0
 	return true
 }
@@ -308,6 +313,13 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Expirate,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   Filtrate,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
@@ -361,6 +373,8 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	case Pneumocyte:
 		fallthrough
 	case Keratinocyte:
+		fallthrough
+	case Podocyte:
 		// Do nothing but work.
 	case Myocyte:
 		currNode.next = &StateNode{
@@ -391,7 +405,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	}
 	currNode.next = &StateNode{
 		function: &ProteinFunction{
-			action:   ShouldMitosisAndRepair,
+			action:   WillMitosisAndRepair,
 			proteins: GenerateRandomProteinPermutation(c),
 		},
 	}
@@ -408,19 +422,19 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 
 // Bacteria Related CellActions
 
-func BacteriaShouldMitosis(ctx context.Context, cell CellActor) bool {
+func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	// Bacteria will not be allowed to repair itself.
 	// Three conditions for bacteria mitosis, may allow runaway growth:
 	// - Enough internal energy (successful calls to Oxygenate)
 	// - Enough vitamin or glucose resources (not picky)
 	// - Enough time has passed
-	resource := cell.Parent().materialPool.GetResource()
-	defer cell.Parent().materialPool.PutResource(resource)
-	if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.ShouldMitosis() {
+	resource := cell.Organ().materialPool.GetResource()
+	defer cell.Organ().materialPool.PutResource(resource)
+	if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.WillMitosis() {
 		resource.glucose -= GLUCOSE_COST_MITOSIS
 		c := cell.Mitosis()
 		c.Start(ctx)
-	} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.ShouldMitosis() {
+	} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.WillMitosis() {
 		resource.vitamins -= VITAMIN_COST_MITOSIS
 		c := cell.Mitosis()
 		c.Start(ctx)
@@ -439,8 +453,8 @@ func BacteriaConsume(ctx context.Context, cell CellActor) bool {
 }
 
 func BacteriaShouldApoptosis(ctx context.Context, cell CellActor) bool {
-	waste := cell.Parent().materialPool.GetWaste()
-	defer cell.Parent().materialPool.PutWaste(waste)
+	waste := cell.Organ().materialPool.GetWaste()
+	defer cell.Organ().materialPool.PutWaste(waste)
 	if waste.toxins >= TOXINS_THRESHOLD {
 		cell.IncurDamage(1)
 	}
@@ -458,7 +472,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
-				action:   BacteriaShouldMitosis,
+				action:   BacteriaWillMitosis,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		},
