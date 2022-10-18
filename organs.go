@@ -26,20 +26,23 @@ const (
 	move               // Called on muscle cells by brain cells.
 	think              // Called on brain cells to perform a computation, by muscle cells.
 	digest             // Called on gut cells, by muscle cells.
+	filter             // Called on kidney cellzs, by blood cells.
 )
 
 func (w WorkType) String() string {
 	switch w {
+	case cover:
+		return "cover"
 	case diffusion:
 		return "diffusion"
 	case digest:
 		return "digest"
-	case cover:
-		return "cover"
-	case inhale:
-		return "inhale"
 	case exhale:
 		return "exhale"
+	case filter:
+		return "filter"
+	case inhale:
+		return "inhale"
 	case pump:
 		return "pump"
 	case move:
@@ -52,7 +55,7 @@ func (w WorkType) String() string {
 
 type Worker interface {
 	WorkType() WorkType
-	SetParent(parent *Node)
+	SetOrgan(organ *Node)
 	Work(ctx context.Context, request Work) Work
 }
 
@@ -121,8 +124,8 @@ func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cell.SetParent(n)
-	fmt.Println("Initialized:", cell, "in", cell.Parent())
+	cell.SetOrgan(n)
+	fmt.Println("Initialized:", cell, "in", cell.Organ())
 	cell.Start(context.Background())
 
 	fmt.Fprintf(w, "Success: Created %s", cell)
@@ -307,13 +310,13 @@ func (n *Node) AddWorker(worker Worker) {
 		}
 		n.managers[worker.WorkType()] = manager
 	}
-	worker.SetParent(n)
+	worker.SetOrgan(n)
 }
 
 func (n *Node) RemoveWorker(worker Worker) {
 	n.Lock()
 	defer n.Unlock()
-	worker.SetParent(nil)
+	worker.SetOrgan(nil)
 }
 
 func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
@@ -352,7 +355,9 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 						// Didn't have enough workers to process, we need more cells.
 						// Signal growth ligand.
 						ligand := n.materialPool.GetLigand()
-						ligand.growth++
+						if ligand.growth < LIGAND_GROWTH_THRESHOLD {
+							ligand.growth++
+						}
 						n.materialPool.PutLigand(ligand)
 					}
 					cancel()
@@ -379,9 +384,8 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	waste := n.materialPool.GetWaste()
 	defer n.materialPool.PutWaste(waste)
 	waste.Add(&WasteBlob{
-		co2:      data.Waste.CO2,
-		toxins:   data.Waste.Toxins,
-		antigens: data.Waste.Antigens,
+		co2:    data.Waste.CO2,
+		toxins: data.Waste.Toxins,
 	})
 }
 
@@ -499,8 +503,8 @@ func (n *Node) SendDiffusion() {
 		}
 
 		// Grab a resource and waste blob to diffuse. Can be empty.
-		resource := n.materialPool.GetResource()
-		waste := n.materialPool.GetWaste()
+		resource := n.materialPool.SplitResource()
+		waste := n.materialPool.SplitWaste()
 		diffusionData, err := json.Marshal(DiffusionSocketData{
 			Resources: ResourceBlobData{
 				O2:       resource.o2,
@@ -508,9 +512,8 @@ func (n *Node) SendDiffusion() {
 				Vitamins: resource.vitamins,
 			},
 			Waste: WasteBlobData{
-				CO2:      waste.co2,
-				Toxins:   waste.toxins,
-				Antigens: []Protein{},
+				CO2:    waste.co2,
+				Toxins: waste.toxins,
 			},
 		})
 		if err != nil {

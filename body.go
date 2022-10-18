@@ -8,15 +8,6 @@ import (
 	"net/http"
 )
 
-type EdgeType int // Determines how Nodes are connected.
-
-const (
-	cellular    EdgeType = iota // Cell to cell connection
-	bloodVessel                 // Connected via blood vessels
-	lymphVessel                 // Connected via lymph vessels
-	neurons                     // Connected via neurons.
-)
-
 type Graph struct {
 	allNodes map[string]*Node
 }
@@ -32,6 +23,7 @@ type Body struct {
 	lungNodes   []*Node
 	muscleNodes []*Node
 	skinNodes   []*Node
+	kidneyNodes []*Node
 }
 
 func MakeTransportRequest(
@@ -88,6 +80,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		b.muscleNodes,
 		b.skinNodes,
 		b.gutNodes,
+		b.kidneyNodes,
 	}
 	cellTypes := []CellType{
 		RedBlood,
@@ -97,6 +90,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Myocyte,
 		Keratinocyte,
 		Enterocyte,
+		Podocyte,
 	}
 
 	workTypes := []WorkType{
@@ -107,6 +101,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		move,   // Muscles
 		cover,  // Skin
 		digest, // Gut
+		filter, // Kidney
 	}
 
 	counts := []int{
@@ -117,16 +112,13 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		1, // Muscles
 		1, // Skin
 		1, // Gut
+		1, // Kidney
 	}
 	humanDNA := MakeDNA(HUMAN_DNA, HUMAN_NAME)
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i])
-				// cell := MakeEukaryoticStemCell(humanDNA, cellTypes[i], workTypes[i])
-				// cell.parent = node
-				// fmt.Println("Initialized:", cell, "in", cell.parent)
-				// cell.Start(ctx)
 			}
 		}
 	}
@@ -148,10 +140,6 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], 0)
-				// cell := MakeProkaryoticCell(bacteriaDNA, cellType)
-				// cell.parent = node
-				// fmt.Println("Initialized:", cell, "in", cell.parent)
-				// cell.Start(ctx)
 			}
 		}
 	}
@@ -331,6 +319,15 @@ func GenerateBody(ctx context.Context) *Body {
 	ConnectNodes(ctx, gut, muscleLeftLeg)
 	ConnectNodes(ctx, gut, muscleRightLeg)
 	b.gutNodes = append(b.gutNodes, gut)
+
+	// Kidneys
+	kidneyLeft := InitializeNewNode(ctx, b.Graph, "Kidney - Left")
+	ConnectNodes(ctx, kidneyLeft, bloodTorso)
+	ConnectNodes(ctx, kidneyLeft, lymphTorso)
+	kidneyRight := InitializeNewNode(ctx, b.Graph, "Kidney - Right")
+	ConnectNodes(ctx, kidneyRight, bloodTorso)
+	ConnectNodes(ctx, kidneyRight, lymphTorso)
+	b.kidneyNodes = append(b.kidneyNodes, kidneyLeft, kidneyRight)
 
 	b.GenerateCellsAndStart(ctx)
 	return b
