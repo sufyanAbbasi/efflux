@@ -143,7 +143,14 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		log.Fatalf("Cell %v is unable to perform work: %v", c, request)
 	}
 	if c.organ.materialPool != nil && !c.CollectResources(ctx) {
-		fmt.Println("Not enough resources:", c, "in", c.organ)
+		if c.cellType != RedBlood {
+			if c.resourceNeed.glucose > 0 {
+				fmt.Println("Not enough glucose:", c, "in", c.organ)
+			}
+			if c.resourceNeed.o2 > 0 {
+				fmt.Println("Not enough oxygen:", c, "in", c.organ)
+			}
+		}
 		request.status = 503
 		request.result = "Not enough resources."
 		return request
@@ -152,57 +159,45 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	switch c.cellType {
 	case RedBlood:
 		waste := c.organ.materialPool.GetWaste()
-		waste.co2 += 6
+		waste.co2 += CELLULAR_TRANSPORT_CO2
 		c.organ.materialPool.PutWaste(waste)
-		resource := c.organ.materialPool.GetResource()
-		if resource.o2 <= 6 {
-			resource.o2 = 0
-		} else {
-			resource.o2 -= 6
-		}
-		c.organ.materialPool.PutResource(resource)
-		request.status = 200
-		request.result = "Completed."
 	case Enterocyte:
-		for i := 0; i < GLUCOSE_INTAKE/6; i++ {
-			resource := c.organ.materialPool.GetResource()
-			resource.glucose += 6
-			c.organ.materialPool.PutResource(resource)
-		}
-		request.status = 200
-		request.result = "Completed."
+		resource := c.organ.materialPool.GetResource()
+		resource.glucose += GLUCOSE_INTAKE
+		resource.glucose += VITAMIN_INTAKE
+		c.organ.materialPool.PutResource(resource)
 	case Podocyte:
 		waste := c.organ.materialPool.GetWaste()
-		if waste.toxins <= 10 {
-			waste.toxins = 0
+		if waste.creatinine <= CREATININE_FILTRATE {
+			waste.creatinine = 0
 		} else {
-			waste.toxins -= 10
+			waste.creatinine -= CREATININE_FILTRATE
 		}
 		c.organ.materialPool.PutWaste(waste)
-		request.status = 200
-		request.result = "Completed."
 	case Pneumocyte:
 		waste := c.organ.materialPool.GetWaste()
-		waste.co2 = 0
+		if waste.co2 <= CELLULAR_TRANSPORT_CO2 {
+			waste.co2 = 0
+		} else {
+			waste.co2 -= CELLULAR_TRANSPORT_CO2
+		}
 		c.organ.materialPool.PutWaste(waste)
 		resource := c.organ.materialPool.GetResource()
-		resource.o2 += 100
+		resource.o2 += LUNG_O2_INTAKE
 		c.organ.materialPool.PutResource(resource)
-		request.status = 200
-		request.result = "Completed."
+	case Myocyte:
+		fallthrough
 	case Keratinocyte:
 		fallthrough
 	case Neuron:
 		fallthrough
 	case Cardiomyocyte:
 		fallthrough
-	case Myocyte:
-		fallthrough
 	default:
-		request.status = 200
-		request.result = "Completed."
-		c.ProduceWaste()
 	}
+	request.status = 200
+	request.result = "Completed."
+	c.ProduceWaste()
 	c.Unlock()
 	return request
 }
@@ -228,6 +223,9 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 	for !reflect.DeepEqual(c.resourceNeed, new(ResourceBlob)) {
 		select {
 		case <-ctx.Done():
+			if c.cellType != RedBlood {
+				fmt.Println(c, "Timeout")
+			}
 			return false
 		default:
 			resource := c.organ.materialPool.GetResource()
@@ -241,23 +239,29 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 
 func (c *Cell) ResetResourceNeed() {
 	switch c.cellType {
-	case Pneumocyte:
-		fallthrough
 	case Keratinocyte:
 		fallthrough
 	case Enterocyte:
 		fallthrough
 	case Podocyte:
-		fallthrough
-	case RedBlood:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
 			glucose: 0,
 		}
+	case Pneumocyte:
+		c.resourceNeed = &ResourceBlob{
+			o2:      CELLULAR_TRANSPORT_O2,
+			glucose: 0,
+		}
+	case RedBlood:
+		c.resourceNeed = &ResourceBlob{
+			o2:      CELLULAR_TRANSPORT_O2,
+			glucose: CELLULAR_TRANSPORT_GLUCOSE,
+		}
 	case Bacteroidota:
 		c.resourceNeed = &ResourceBlob{
-			o2:      6,
-			glucose: 60,
+			o2:      CELLULAR_RESPIRATION_O2,
+			glucose: CELLULAR_RESPIRATION_GLUCOSE,
 		}
 	case Neuron:
 		fallthrough
@@ -267,8 +271,8 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	default:
 		c.resourceNeed = &ResourceBlob{
-			o2:      6,
-			glucose: 6,
+			o2:      CELLULAR_RESPIRATION_O2,
+			glucose: CELLULAR_RESPIRATION_GLUCOSE,
 		}
 	}
 }
@@ -288,10 +292,10 @@ func (c *Cell) ProduceWaste() {
 			// No waste produced.
 		case Bacteroidota:
 			waste := c.organ.materialPool.GetWaste()
-			waste.co2 += 6
+			waste.co2 += CELLULAR_RESPIRATION_CO2
 			c.organ.materialPool.PutWaste(waste)
 			resource := c.Organ().materialPool.GetResource()
-			resource.vitamins += 60
+			resource.vitamins += BACTERIA_VITAMIN_PRODUCTION
 			c.Organ().materialPool.PutResource(resource)
 		case Cardiomyocyte:
 			fallthrough
@@ -301,8 +305,8 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		default:
 			waste := c.organ.materialPool.GetWaste()
-			waste.toxins += 1
-			waste.co2 += 6
+			waste.creatinine += CREATININE_PRODUCTION
+			waste.co2 += CELLULAR_RESPIRATION_CO2
 			c.organ.materialPool.PutWaste(waste)
 		}
 	}

@@ -146,7 +146,7 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
 	waste := cell.Organ().materialPool.GetWaste()
 	defer cell.Organ().materialPool.PutWaste(waste)
-	if waste.toxins >= TOXINS_THRESHOLD {
+	if waste.creatinine >= CREATININE_THRESHOLD {
 		cell.IncurDamage(1)
 	}
 	if waste.co2 >= CO2_THRESHOLD {
@@ -168,16 +168,17 @@ func Apoptosis(ctx context.Context, cell CellActor) bool {
 func Respirate(ctx context.Context, cell CellActor) bool {
 	// Receive a unit of 02 for a unit of CO2
 	request := cell.Organ().RequestWork(Work{
-		workType: inhale,
+		workType: exchange,
 	})
 	if request.status == 200 {
 		resource := cell.Organ().materialPool.GetResource()
 		defer cell.Organ().materialPool.PutResource(resource)
-		resource.o2 += 6
+		resource.o2 += CELLULAR_TRANSPORT_O2
+		resource.glucose += CELLULAR_TRANSPORT_GLUCOSE
 		waste := cell.Organ().materialPool.GetWaste()
 		defer cell.Organ().materialPool.PutWaste(waste)
-		if waste.co2 > 6 {
-			waste.co2 -= 6
+		if waste.co2 > CELLULAR_TRANSPORT_CO2 {
+			waste.co2 -= CELLULAR_TRANSPORT_CO2
 		} else {
 			waste.co2 = 0
 		}
@@ -193,31 +194,31 @@ func Expirate(ctx context.Context, cell CellActor) bool {
 	if request.status == 200 {
 		waste := cell.Organ().materialPool.GetWaste()
 		defer cell.Organ().materialPool.PutWaste(waste)
-		if waste.co2 <= 6 {
+		if waste.co2 <= CELLULAR_TRANSPORT_CO2 {
 			waste.co2 = 0
 		} else {
-			waste.co2 -= 6
+			waste.co2 -= CELLULAR_TRANSPORT_CO2
 		}
 
 		resource := cell.Organ().materialPool.GetResource()
 		defer cell.Organ().materialPool.PutResource(resource)
-		resource.o2 += 6
+		resource.o2 += CELLULAR_TRANSPORT_O2
 	}
 	return true
 }
 
 func Filtrate(ctx context.Context, cell CellActor) bool {
-	// Remove some amount of toxins.
+	// Remove some amount of creatinine.
 	request := cell.Organ().RequestWork(Work{
 		workType: filter,
 	})
 	if request.status == 200 {
 		waste := cell.Organ().materialPool.GetWaste()
 		defer cell.Organ().materialPool.PutWaste(waste)
-		if waste.toxins <= 10 {
-			waste.toxins = 0
+		if waste.creatinine <= CREATININE_FILTRATE {
+			waste.creatinine = 0
 		} else {
-			waste.toxins -= 10
+			waste.creatinine -= CREATININE_FILTRATE
 		}
 	}
 	return true
@@ -244,21 +245,27 @@ func MuscleSeekSkinProtection(ctx context.Context, cell CellActor) bool {
 }
 
 func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
-	// Check resources in the brain. If not enough,
-	// stimulate muscle movements.
-	resource := cell.Organ().materialPool.GetResource()
-	defer cell.Organ().materialPool.PutResource(resource)
-	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD {
-		// If vitamin levels are low, move more.
-		cell.Organ().RequestWork(Work{
-			workType: move,
-		})
+	cell.Organ().RequestWork(Work{
+		workType: move,
+	})
+
+	// Check resources in the brain. If not enough, stimulate muscle movements.
+	organ := cell.Organ()
+	resource := organ.materialPool.resourcePool.resources
+	ligand := organ.materialPool.GetLigand()
+	defer organ.materialPool.PutLigand(ligand)
+	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD || resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
+		fmt.Println("HUNGRY")
+		// If glocose or vitamin levels are low, produce hunger ligands.
+		ligand.hunger += 1
+	} else if ligand.hunger > 1 {
+		ligand.hunger -= 1
 	}
-	if resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
-		// If glocose levels are low, move more.
+	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
 		cell.Organ().RequestWork(Work{
 			workType: move,
 		})
+		ligand.hunger--
 	}
 	return true
 }
@@ -455,7 +462,7 @@ func BacteriaConsume(ctx context.Context, cell CellActor) bool {
 func BacteriaShouldApoptosis(ctx context.Context, cell CellActor) bool {
 	waste := cell.Organ().materialPool.GetWaste()
 	defer cell.Organ().materialPool.PutWaste(waste)
-	if waste.toxins >= TOXINS_THRESHOLD {
+	if waste.creatinine >= CREATININE_THRESHOLD {
 		cell.IncurDamage(1)
 	}
 	if waste.co2 >= CO2_THRESHOLD {

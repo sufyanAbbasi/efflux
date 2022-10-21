@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/ring"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,8 +19,8 @@ type WorkType int
 const (
 	diffusion WorkType = iota
 	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	inhale             // Called on lung cells by blood cells.
-	exhale             // Called on blood cells by other cells.
+	exchange           // Called on blood cells by other cells.
+	exhale             // Called on lung cells by blood cells.
 	pump               // Called on to heart cells to pump, by brain cels.
 	move               // Called on muscle cells by brain cells.
 	think              // Called on brain cells to perform a computation, by muscle cells.
@@ -41,8 +40,8 @@ func (w WorkType) String() string {
 		return "exhale"
 	case filter:
 		return "filter"
-	case inhale:
-		return "inhale"
+	case exchange:
+		return "exchange"
 	case pump:
 		return "pump"
 	case move:
@@ -77,10 +76,11 @@ type DiffusionSocketData struct {
 }
 
 type StatusSocketData struct {
-	Status      int              `json:"status"`
-	Name        string           `json:"name"`
-	Connections []string         `json:"connections"`
-	WorkStatus  []WorkStatusData `json:"workStatus"`
+	Status         int                `json:"status"`
+	Name           string             `json:"name"`
+	Connections    []string           `json:"connections"`
+	WorkStatus     []WorkStatusData   `json:"workStatus"`
+	MaterialStatus MaterialStatusData `json:"materialStatus"`
 }
 
 type WorkStatusData struct {
@@ -90,6 +90,16 @@ type WorkStatusData struct {
 	FailureCount          int    `json:"failureCount"`
 	CompletedCount        int    `json:"completedCount"`
 	CompletedFailureCount int    `json:"completedFailureCount"`
+}
+
+type MaterialStatusData struct {
+	O2         int `json:"o2"`
+	Glucose    int `json:"glucose"`
+	Vitamin    int `json:"vitamin"`
+	Co2        int `json:"co2"`
+	Creatinine int `json:"creatinine"`
+	Growth     int `json:"growth"`
+	Hunger     int `json:"hunger"`
 }
 
 type TransportRequest struct {
@@ -171,18 +181,17 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
-	ctx              context.Context
-	name             string
-	edges            []*Edge
-	serverMux        *http.ServeMux
-	origin           string
-	port             string
-	websocketUrl     string
-	transportUrl     string
-	managers         map[WorkType]*WorkManager
-	materialPool     *MaterialPool
-	diffusionTracker *ring.Ring
-	world            *World
+	ctx          context.Context
+	name         string
+	edges        []*Edge
+	serverMux    *http.ServeMux
+	origin       string
+	port         string
+	websocketUrl string
+	transportUrl string
+	managers     map[WorkType]*WorkManager
+	materialPool *MaterialPool
+	world        *World
 }
 
 var currentPort = 7999
@@ -222,7 +231,6 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 				attached: []*Renderable{},
 			},
 		},
-		diffusionTracker: ring.New(DIFFUSION_TRACKER_BUFFER),
 	}
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
@@ -349,6 +357,11 @@ func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
 						manager.completedCount++
 						if finishedWork.status != 200 {
 							manager.completedFailureCount++
+							// Need more workers to complete the job.
+							ligand := n.materialPool.GetLigand()
+							if ligand.growth < LIGAND_GROWTH_THRESHOLD {
+								ligand.growth++
+							}
 						}
 						manager.Unlock()
 					case <-ctx.Done():
@@ -384,8 +397,8 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	waste := n.materialPool.GetWaste()
 	defer n.materialPool.PutWaste(waste)
 	waste.Add(&WasteBlob{
-		co2:    data.Waste.CO2,
-		toxins: data.Waste.Toxins,
+		co2:        data.Waste.CO2,
+		creatinine: data.Waste.Creatinine,
 	})
 }
 
@@ -420,11 +433,21 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 				manager.completedFailureCount = 0
 				manager.Unlock()
 			}
+			materialStatus := MaterialStatusData{
+				O2:         n.materialPool.resourcePool.resources.o2,
+				Glucose:    n.materialPool.resourcePool.resources.glucose,
+				Vitamin:    n.materialPool.resourcePool.resources.vitamins,
+				Co2:        n.materialPool.wastePool.wastes.co2,
+				Creatinine: n.materialPool.wastePool.wastes.creatinine,
+				Growth:     n.materialPool.ligandPool.ligands.growth,
+				Hunger:     n.materialPool.ligandPool.ligands.hunger,
+			}
 			err := SendStatus(connection, StatusSocketData{
-				Status:      200,
-				Name:        n.name,
-				Connections: connections,
-				WorkStatus:  workStatus,
+				Status:         200,
+				Name:           n.name,
+				Connections:    connections,
+				WorkStatus:     workStatus,
+				MaterialStatus: materialStatus,
 			})
 			if err != nil {
 				return
@@ -491,16 +514,8 @@ func (n *Node) SendDiffusion() {
 		if len(n.edges) == 0 {
 			return
 		}
+		// Pick a random edge to diffuse to.
 		edge := n.edges[rand.Intn(len(n.edges))]
-		if len(n.edges) > 1 {
-			tries := DIFFUSION_TRACKER_BUFFER
-			prev := n.diffusionTracker.Prev()
-			for prev.Value != nil && edge != prev.Value.(*Edge) && tries > 0 {
-				edge = n.edges[rand.Intn(len(n.edges))]
-				prev = n.diffusionTracker.Prev()
-				tries--
-			}
-		}
 
 		// Grab a resource and waste blob to diffuse. Can be empty.
 		resource := n.materialPool.SplitResource()
@@ -512,8 +527,8 @@ func (n *Node) SendDiffusion() {
 				Vitamins: resource.vitamins,
 			},
 			Waste: WasteBlobData{
-				CO2:    waste.co2,
-				Toxins: waste.toxins,
+				CO2:        waste.co2,
+				Creatinine: waste.creatinine,
 			},
 		})
 		if err != nil {
@@ -524,8 +539,6 @@ func (n *Node) SendDiffusion() {
 			result:   string(diffusionData),
 			status:   0,
 		})
-		n.diffusionTracker.Value = edge
-		n.diffusionTracker = n.diffusionTracker.Next()
 	}
 }
 
