@@ -64,51 +64,58 @@ func (r *ResourceBlob) Split() *ResourceBlob {
 }
 
 type WasteBlob struct {
-	co2    int
-	toxins int
+	co2        int
+	creatinine int
 }
 
 type WasteBlobData struct {
-	CO2    int
-	Toxins int
+	CO2        int
+	Creatinine int
 }
 
 func (w *WasteBlob) Add(waste *WasteBlob) {
 	w.co2 += waste.co2
-	w.toxins += waste.toxins
+	w.creatinine += waste.creatinine
 }
 
 func (w *WasteBlob) Split() *WasteBlob {
 	keep := &WasteBlob{
-		co2:    0,
-		toxins: 0,
+		co2:        0,
+		creatinine: 0,
 	}
 	if w.co2 > 1 {
 		w.co2 /= 2
 		keep.co2 += w.co2
 	}
-	if w.toxins > 1 {
-		w.toxins /= 2
-		keep.toxins += w.toxins
+	if w.creatinine > 1 {
+		w.creatinine /= 2
+		keep.creatinine += w.creatinine
 	}
 	return keep
 }
 
 type LigandBlob struct {
 	growth int
+	hunger int
 }
 
 func (l *LigandBlob) Add(ligand *LigandBlob) {
 	l.growth += ligand.growth
+	l.hunger += ligand.growth
 }
 
 func (l *LigandBlob) Split() *LigandBlob {
 	keep := &LigandBlob{
 		growth: 0,
+		hunger: 0,
 	}
 	if l.growth > 1 {
 		l.growth /= 2
 		keep.growth += l.growth
+	}
+	if l.hunger > 1 {
+		l.hunger /= 2
+		keep.hunger += l.hunger
 	}
 	return keep
 }
@@ -122,12 +129,6 @@ type ResourcePool struct {
 func (p *ResourcePool) Get() *ResourceBlob {
 	p.wantChan <- struct{}{}
 	return <-p.resourceChan
-	// select {
-	// case r := <-p.resourceChan:
-	// 	return r
-	// default:
-	// 	return new(ResourceBlob)
-	// }
 }
 
 func (p *ResourcePool) Put(r *ResourceBlob) {
@@ -154,12 +155,6 @@ type WastePool struct {
 func (p *WastePool) Get() *WasteBlob {
 	p.wantChan <- struct{}{}
 	return <-p.wasteChan
-	// select {
-	// case r := <-p.wasteChan:
-	// 	return r
-	// default:
-	// 	return new(WasteBlob)
-	// }
 }
 
 func (p *WastePool) Put(r *WasteBlob) {
@@ -186,12 +181,6 @@ type LigandPool struct {
 func (p *LigandPool) Get() *LigandBlob {
 	p.wantChan <- struct{}{}
 	return <-p.ligandChan
-	// select {
-	// case r := <-p.ligandChan:
-	// 	return r
-	// default:
-	// 	return new(LigandBlob)
-	// }
 }
 
 func (p *LigandPool) Put(r *LigandBlob) {
@@ -229,8 +218,8 @@ func InitializeMaterialPool() *MaterialPool {
 		},
 		wastePool: &WastePool{
 			wastes: &WasteBlob{
-				co2:    0,
-				toxins: 0,
+				co2:        0,
+				creatinine: 0,
 			},
 			wasteChan: make(chan *WasteBlob, POOL_SIZE),
 			wantChan:  make(chan struct{}, POOL_SIZE),

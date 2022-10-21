@@ -18,7 +18,7 @@ const cy = cytoscape({
           'border-width': '2px',
           'border-color': 'black',
           'width': '550px',
-          'height': '150px',
+          'height': '180px',
           'text-wrap': 'wrap',
           'text-justification': 'left',
           'font-family': 'monospace',
@@ -114,10 +114,10 @@ class Node {
                 }
             }
         }
-        this.updateLabel(this.status.workStatus);
+        this.updateLabel(this.status.workStatus, this.status.materialStatus);
     }
 
-    updateLabel(workStatuses) {
+    updateLabel(workStatuses, materialStatus) {
         const labels = [this.name.padStart(20).padEnd(40)];
 
         if (!workStatuses) {
@@ -130,6 +130,10 @@ class Node {
                 labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(successCount)}|${makePadding(failureCount)}|${makePadding(`${completedCount} (${completedFailureCount})`)}`);
             }
         }
+        const makePadding = (str) => String(str).padStart(5).padEnd(10);
+        labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
+        labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
+        labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)}`);
 
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
