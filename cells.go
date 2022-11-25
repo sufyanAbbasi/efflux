@@ -291,7 +291,7 @@ func (c *Cell) Render() {
 		id: c.renderId,
 		render: &Render{
 			visible:  true,
-			color:    0xFF0000,
+			color:    0xFF0000FF,
 			geometry: "sphere",
 		},
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/ring"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -168,18 +167,17 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
-	ctx              context.Context
-	name             string
-	edges            []*Edge
-	serverMux        *http.ServeMux
-	origin           string
-	port             string
-	websocketUrl     string
-	transportUrl     string
-	managers         map[WorkType]*WorkManager
-	materialPool     *MaterialPool
-	diffusionTracker *ring.Ring
-	world            *World
+	ctx          context.Context
+	name         string
+	edges        []*Edge
+	serverMux    *http.ServeMux
+	origin       string
+	port         string
+	websocketUrl string
+	transportUrl string
+	managers     map[WorkType]*WorkManager
+	materialPool *MaterialPool
+	world        *World
 }
 
 var currentPort = 7999
@@ -219,7 +217,6 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 				attached: []*Renderable{},
 			},
 		},
-		diffusionTracker: ring.New(DIFFUSION_TRACKER_BUFFER),
 	}
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
