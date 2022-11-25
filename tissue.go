@@ -20,20 +20,16 @@ type Renderable struct {
 }
 
 type RenderData struct {
-	Id       RenderID `json:"id"`
-	Visible  bool     `json:"visible"`
-	X        float32  `json:"x"`
-	Y        float32  `json:"y"`
-	Z        float32  `json:"z"`
-	Color    uint32   `json:"color"`
-	Geometry string   `json:"geometry"`
+	Id      RenderID `json:"id"`
+	Visible bool     `json:"visible"`
+	X       float32  `json:"x"`
+	Y       float32  `json:"y"`
+	Z       float32  `json:"z"`
 }
 
 type Render struct {
-	visible  bool
-	x, y, z  float32
-	color    uint32
-	geometry string
+	visible bool
+	x, y, z float32
 }
 
 func (r *Render) MoveX(x float32) {
@@ -57,27 +53,17 @@ func (r *Render) MoveZ(z float32) {
 	r.z += z
 }
 
-func (r *Render) ChangeColor(color uint32) {
-	r.color = color
-}
-
-func (r *Render) ChangeGeometry(geometry string) {
-	r.geometry = geometry
-}
-
 func (r *Render) SetVisible(visible bool) {
 	r.visible = visible
 }
 
 func (r *Render) RenderData(renderId RenderID) RenderData {
 	renderData := RenderData{
-		Id:       renderId,
-		Visible:  r.visible,
-		X:        r.x,
-		Y:        r.y,
-		Z:        r.z,
-		Color:    r.color,
-		Geometry: r.geometry,
+		Id:      renderId,
+		Visible: r.visible,
+		X:       r.x,
+		Y:       r.y,
+		Z:       r.z,
 	}
 	return renderData
 }

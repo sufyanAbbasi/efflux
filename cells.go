@@ -323,9 +323,7 @@ func (c *Cell) Render() {
 	c.render = &Renderable{
 		id: c.renderId,
 		render: &Render{
-			visible:  true,
-			color:    0xFF0000,
-			geometry: "sphere",
+			visible: true,
 		},
 	}
 	c.detach = c.organ.world.Attach(c.render)

@@ -183,14 +183,25 @@ class Node {
         renderContainer.classList.add('show')
         let scene = document.querySelector('.render a-scene');
         if (!scene) {
+            const numPlanes = 5;
             render(html`<a-scene embedded>
-                    <a-assets>
-                    <img id="sky" src="phagocytosis.jpg">
+                <a-assets>
+                    <img id="background" src="acanthocytes.jpg">
                 </a-assets>
-                <a-sky src="#sky"></a-sky>
-                <a-entity id="rig" position="-1 -1 -1">
-                    <a-camera id="camera"></a-camera>
-                </a-entity>
+                <a-sky color="white"></a-sky>
+                ${Array(numPlanes).fill(null).map((_, i) => html`
+                    <a-plane
+                        material="src:#background; repeat: 5 5; opacity: 0.5"
+                        height="50"
+                        width="50"
+                        position="0 0 ${i - numPlanes}"
+                        rotation="0 0 0">
+                    </a-plane>
+                `)}
+                <a-camera
+                    id="camera"
+                    position="0 0 10">
+                </a-camera>
             </a-scene>
             <button class="close" @click="${() => {
                 this.collapseScene();
@@ -265,7 +276,6 @@ class Render {
             x,
             y,
             z,
-            color,
         } = renderData;
         // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
         let el = document.querySelector(`#${id}`);
@@ -276,17 +286,18 @@ class Render {
                     id="${id}"
                     class="cell"
                     radius="0.25"
-                    color="${color ? `#${Number(color).toString(16)}` : 'red'}"
-                    position="${x} ${y} ${z}">
+                    color="red"
+                    position="${x} ${y} 0">
                 </a-sphere>
             `, container);
             el = container.firstElementChild;
-            document.querySelector('a-scene')?.appendChild(el);
+            const planes = document.querySelectorAll('a-plane');
+            const plane = planes[z] || planes[0];
+            plane?.appendChild(el);
         }
         if (el.object3D) {
             el.object3D.visible = visible;
             el.object3D.position.set(x, y, z)
-            el.setAttribute('color', color ? `#${Number(color).toString(16)}` : 'red');
         }
     }
 }
