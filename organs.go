@@ -100,6 +100,7 @@ type MaterialStatusData struct {
 	Creatinine int `json:"creatinine"`
 	Growth     int `json:"growth"`
 	Hunger     int `json:"hunger"`
+	Asphyxia   int `json:"asphyxia"`
 }
 
 type TransportRequest struct {
@@ -441,6 +442,7 @@ func (n *Node) GetNodeStatus(connection *websocket.Conn) {
 				Creatinine: n.materialPool.wastePool.wastes.creatinine,
 				Growth:     n.materialPool.ligandPool.ligands.growth,
 				Hunger:     n.materialPool.ligandPool.ligands.hunger,
+				Asphyxia:   n.materialPool.ligandPool.ligands.asphyxia,
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
