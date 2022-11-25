@@ -162,6 +162,8 @@ func GenerateBody(ctx context.Context) *Body {
 
 	lungLeft := InitializeNewNode(ctx, b.Graph, "Left Lung")
 	lungRight := InitializeNewNode(ctx, b.Graph, "Right Lung")
+	ConnectNodes(ctx, lungLeft, heart)
+	ConnectNodes(ctx, lungRight, heart)
 	b.lungNodes = append(b.lungNodes, lungLeft, lungRight)
 
 	// Kidneys

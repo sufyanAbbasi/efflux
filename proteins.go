@@ -160,7 +160,7 @@ func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
 }
 
 func Apoptosis(ctx context.Context, cell CellActor) bool {
-	fmt.Println(cell, " Died!")
+	fmt.Println(cell, " Died in", cell.Organ())
 	cell.Apoptosis()
 	return false
 }
@@ -253,15 +253,15 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	organ := cell.Organ()
 	resource := organ.materialPool.resourcePool.resources
 	ligand := organ.materialPool.GetLigand()
-	defer organ.materialPool.PutLigand(ligand)
+	organ.materialPool.PutLigand(ligand)
 	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD || resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
-		fmt.Println("HUNGRY")
 		// If glocose or vitamin levels are low, produce hunger ligands.
 		ligand.hunger += 1
 	} else if ligand.hunger > 1 {
 		ligand.hunger -= 1
 	}
 	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
+		fmt.Println("HUNGRY")
 		cell.Organ().RequestWork(Work{
 			workType: move,
 		})
@@ -274,6 +274,28 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 	cell.Organ().RequestWork(Work{
 		workType: pump,
 	})
+	// Check o2 and co2 in the brain. If not enough/too much, stimulate the heart.
+	organ := cell.Organ()
+	resource := organ.materialPool.resourcePool.resources
+	waste := organ.materialPool.wastePool.wastes
+	ligand := organ.materialPool.GetLigand()
+	organ.materialPool.PutLigand(ligand)
+	if resource.o2 <= BRAIN_O2_THRESHOLD {
+		// If 02 levels are low, produce asphyxia ligands.
+		ligand.asphyxia += 1
+	} else if waste.co2 >= BRAIN_CO2_THRESHOLD {
+		// If C02 levels are too high, produce asphyxia ligands.
+		ligand.asphyxia += 1
+	} else if ligand.asphyxia > 0 {
+		ligand.asphyxia -= 1
+	}
+	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
+		fmt.Println("ASPHYXIA")
+		cell.Organ().RequestWork(Work{
+			workType: pump,
+		})
+		ligand.asphyxia--
+	}
 	return true
 }
 

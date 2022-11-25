@@ -128,7 +128,7 @@ func (c *Cell) Repair(damage int) {
 
 func (c *Cell) IncurDamage(damage int) {
 	c.damage += damage
-	fmt.Println("Damaged:", c)
+	fmt.Println("Damaged:", c, "in", c.organ)
 }
 
 func (c *Cell) Apoptosis() {
@@ -164,7 +164,7 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	case Enterocyte:
 		resource := c.organ.materialPool.GetResource()
 		resource.glucose += GLUCOSE_INTAKE
-		resource.glucose += VITAMIN_INTAKE
+		resource.vitamins += VITAMIN_INTAKE
 		c.organ.materialPool.PutResource(resource)
 	case Podocyte:
 		waste := c.organ.materialPool.GetWaste()
@@ -185,13 +185,20 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		resource := c.organ.materialPool.GetResource()
 		resource.o2 += LUNG_O2_INTAKE
 		c.organ.materialPool.PutResource(resource)
+	case Cardiomyocyte:
+		request := c.organ.RequestWork(Work{
+			workType: exhale,
+		})
+		if request.status == 200 {
+			resource := c.organ.materialPool.GetResource()
+			resource.o2 += CELLULAR_TRANSPORT_O2
+			c.organ.materialPool.PutResource(resource)
+		}
 	case Myocyte:
 		fallthrough
 	case Keratinocyte:
 		fallthrough
 	case Neuron:
-		fallthrough
-	case Cardiomyocyte:
 		fallthrough
 	default:
 	}
@@ -404,7 +411,7 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 			workType: workType,
 			renderId: RenderID(fmt.Sprintf("%v%v", cellType, rand.Intn(1000000))),
 		},
-		telomereLength: 100,
+		telomereLength: TELOMERE_LENGTH,
 		hasTelomerase:  true,
 	}
 }

@@ -95,19 +95,22 @@ func (w *WasteBlob) Split() *WasteBlob {
 }
 
 type LigandBlob struct {
-	growth int
-	hunger int
+	growth   int
+	hunger   int
+	asphyxia int
 }
 
 func (l *LigandBlob) Add(ligand *LigandBlob) {
 	l.growth += ligand.growth
-	l.hunger += ligand.growth
+	l.hunger += ligand.hunger
+	l.asphyxia += ligand.asphyxia
 }
 
 func (l *LigandBlob) Split() *LigandBlob {
 	keep := &LigandBlob{
-		growth: 0,
-		hunger: 0,
+		growth:   0,
+		hunger:   0,
+		asphyxia: 0,
 	}
 	if l.growth > 1 {
 		l.growth /= 2
@@ -116,6 +119,10 @@ func (l *LigandBlob) Split() *LigandBlob {
 	if l.hunger > 1 {
 		l.hunger /= 2
 		keep.hunger += l.hunger
+	}
+	if l.asphyxia > 1 {
+		l.asphyxia /= 2
+		keep.asphyxia += l.asphyxia
 	}
 	return keep
 }
