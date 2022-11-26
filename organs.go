@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"log"
 	"math/rand"
 	"net/http"
@@ -218,21 +219,24 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 		managers:     make(map[WorkType]*WorkManager),
 		world: &World{
 			ctx: ctx,
-			bounds: &Bounds{
-				minX: -100,
-				minY: -100,
-				minZ: -100,
-				maxX: 100,
-				maxY: 100,
-				maxZ: 100,
+			bounds: &image.Rectangle{
+				Min: image.Point{
+					X: -WORLD_BOUNDS,
+					Y: -WORLD_BOUNDS,
+				},
+				Max: image.Point{
+					X: WORLD_BOUNDS,
+					Y: WORLD_BOUNDS,
+				},
 			},
-			streamingChan: make(chan chan *Renderable),
+			streamingChan: make(chan chan RenderableData),
 			rootMatrix: &ExtracellularMatrix{
 				RWMutex:  sync.RWMutex{},
-				attached: []*Renderable{},
+				attached: make(map[RenderID]*Renderable),
 			},
 		},
 	}
+	node.world.rootMatrix.world = node.world
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
 	node.Start(ctx)

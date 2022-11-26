@@ -2,6 +2,8 @@ import {html, render} from 'https://unpkg.com/lit-html?module';
 
 const NodeMap = new Map();
 
+const WORLD_PLANES = 1;
+
 const cy = cytoscape({
 
     container: document.querySelector('.graph'), // container to render in
@@ -183,18 +185,17 @@ class Node {
         renderContainer.classList.add('show')
         let scene = document.querySelector('.render a-scene');
         if (!scene) {
-            const numPlanes = 5;
             render(html`<a-scene embedded>
                 <a-assets>
                     <img id="background" src="acanthocytes.jpg">
                 </a-assets>
                 <a-sky color="white"></a-sky>
-                ${Array(numPlanes).fill(null).map((_, i) => html`
+                ${Array(WORLD_PLANES).fill(null).map((_, i) => html`
                     <a-plane
                         material="src:#background; repeat: 5 5; opacity: 0.5"
-                        height="50"
-                        width="50"
-                        position="0 0 ${i - numPlanes}"
+                        height="100"
+                        width="100"
+                        position="0 0 ${-5 * i}"
                         rotation="0 0 0">
                     </a-plane>
                 `)}

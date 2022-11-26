@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"reflect"
 	"sync"
 	"time"
@@ -69,9 +68,7 @@ type Cell struct {
 	damage       int
 	function     *StateDiagram
 	oxygenated   bool
-	renderId     RenderID
 	render       *Renderable
-	detach       func()
 }
 
 func (c *Cell) String() string {
@@ -132,10 +129,9 @@ func (c *Cell) IncurDamage(damage int) {
 }
 
 func (c *Cell) Apoptosis() {
+	c.render.visible = false
+	c.organ.world.Detach(c.render)
 	c.organ = nil
-	if c.detach != nil {
-		c.detach()
-	}
 }
 
 func (c *Cell) Work(ctx context.Context, request Work) Work {
@@ -320,13 +316,7 @@ func (c *Cell) ProduceWaste() {
 }
 
 func (c *Cell) Render() {
-	c.render = &Renderable{
-		id: c.renderId,
-		render: &Render{
-			visible: true,
-		},
-	}
-	c.detach = c.organ.world.Attach(c.render)
+	c.render = c.organ.world.MakeNewRenderAndAttach(c.cellType.String())
 }
 
 type EukaryoticCell struct {
@@ -407,7 +397,6 @@ func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *Euk
 			dna:      dna,
 			mhc_i:    dna.MHC_I(),
 			workType: workType,
-			renderId: RenderID(fmt.Sprintf("%v%v", cellType, rand.Intn(1000000))),
 		},
 		telomereLength: TELOMERE_LENGTH,
 		hasTelomerase:  true,
@@ -434,7 +423,6 @@ func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
 			cellType: cellType,
 			dna:      dna,
 			mhc_i:    dna.MHC_I(),
-			renderId: RenderID(fmt.Sprintf("%v%v", cellType, rand.Intn(1000000))),
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
