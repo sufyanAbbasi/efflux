@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"math/rand"
 	"sync"
 
@@ -32,13 +33,30 @@ func (r *Renderable) SetVisible(visible bool) {
 
 type World struct {
 	ctx           context.Context
-	bounds        *image.Rectangle
+	bounds        image.Rectangle
 	streamingChan chan chan RenderableData
 	rootMatrix    *ExtracellularMatrix
 }
 
-func (w *World) Bounds() *image.Rectangle {
-	return w.bounds
+func InitializeWorld(ctx context.Context) *World {
+	world := &World{
+		ctx:           ctx,
+		bounds:        image.Rect(-WORLD_BOUNDS, -WORLD_BOUNDS, WORLD_BOUNDS, WORLD_BOUNDS),
+		streamingChan: make(chan chan RenderableData),
+		rootMatrix: &ExtracellularMatrix{
+			RWMutex: sync.RWMutex{},
+			level:   0,
+			render: &Renderable{
+				id:      RenderID(fmt.Sprintf("Matrix%v", rand.Intn(1000000))),
+				visible: true,
+				x:       0,
+				y:       0,
+			},
+			attached: make(map[RenderID]*Renderable),
+		},
+	}
+	world.rootMatrix.world = world
+	return world
 }
 
 func (w *World) MakeNewRenderAndAttach(idPrefix string) *Renderable {
@@ -97,7 +115,23 @@ type ExtracellularMatrix struct {
 	level    int
 	next     *ExtracellularMatrix
 	prev     *ExtracellularMatrix
+	render   *Renderable
 	attached map[RenderID]*Renderable
+}
+
+func (m *ExtracellularMatrix) ColorModel() color.Model {
+	return color.RGBAModel
+}
+
+func (m *ExtracellularMatrix) Bounds() image.Rectangle {
+	return m.world.bounds
+}
+
+func (m *ExtracellularMatrix) At(x, y int) color.Color {
+	if x%10 == 0 || y%10 == 0 {
+		return color.Black
+	}
+	return color.White
 }
 
 func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {
