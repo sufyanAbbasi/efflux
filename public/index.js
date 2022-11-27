@@ -52,6 +52,9 @@ const layout = {
 
 class Node {
     constructor(address) {
+        if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
+            address = `ws://${address}`;
+        }
         this.address = address;
         this.id = address.replace( /\D/g, '');
         this.name = `Unknown ${this.id}`;
@@ -224,11 +227,6 @@ class Node {
     }
 }
 
-Node.makeNode = (origin, port, cy) => {
-    const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
-    return new Node(`${scheme}${origin}:${port}`);
-}
-
 class Render {
     constructor(node) {
         this.node = node;
@@ -308,7 +306,8 @@ function init() {
     selector.addEventListener('input', () => {
         cy.fit(cy.$(selector.value));
     })
-    const root = Node.makeNode(window.location.hostname, 8000);
+    const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
+    const root = new Node(`${scheme}${window.location.hostname}:8000`);
     NodeMap.set(root.address, root);
     layout.roots = [root.id];
 

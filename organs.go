@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 type WorkType int
@@ -112,7 +112,7 @@ type TransportRequest struct {
 }
 
 type Edge struct {
-	workConnection *websocket.Conn
+	workConnection *Connection
 	transportUrl   string
 }
 
@@ -142,8 +142,8 @@ func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Success: Created %s", cell)
 }
 
-func SendWork(connection *websocket.Conn, request Work) {
-	err := websocket.JSON.Send(connection, WorkSocketData{
+func SendWork(connection *Connection, request Work) {
+	err := connection.WriteJSON(WorkSocketData{
 		WorkType: int(request.workType),
 		Result:   request.result,
 		Status:   request.status,
@@ -153,13 +153,13 @@ func SendWork(connection *websocket.Conn, request Work) {
 	}
 }
 
-func SendStatus(connection *websocket.Conn, status StatusSocketData) error {
-	return websocket.JSON.Send(connection, status)
+func SendStatus(connection *Connection, status StatusSocketData) error {
+	return connection.WriteJSON(status)
 }
 
-func ReceiveWork(connection *websocket.Conn) (request Work) {
+func ReceiveWork(connection *Connection) (request Work) {
 	data := &WorkSocketData{}
-	err := websocket.JSON.Receive(connection, &data)
+	err := connection.ReadJSON(data)
 	if err != nil {
 		log.Fatal("Receive: ", err)
 	}
@@ -229,13 +229,57 @@ func (n *Node) String() string {
 	return fmt.Sprintf("%v (%v%v)", n.name, n.origin[:len(n.origin)-1], n.port)
 }
 
+type Connection struct {
+	readMu  sync.RWMutex
+	writeMu sync.RWMutex
+	*websocket.Conn
+}
+
+func (c *Connection) WriteJSON(v interface{}) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.Conn.WriteJSON(v)
+}
+
+func (c *Connection) ReadJSON(v interface{}) error {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	return c.Conn.ReadJSON(v)
+}
+
+func (c *Connection) Close() error {
+	return c.Conn.Close()
+}
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+func WebsocketHandler(connectionHandler func(connection *Connection)) func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		connectionHandler(&Connection{
+			Conn: conn,
+		})
+	}
+	return handler
+}
+
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
-	n.serverMux.Handle(WORK_ENDPOINT, websocket.Handler(n.ProcessIncomingWorkRequests))
-	n.serverMux.Handle(STATUS_ENDPOINT, websocket.Handler(n.GetNodeStatus))
+	n.serverMux.HandleFunc(WORK_ENDPOINT, WebsocketHandler(n.ProcessIncomingWorkRequests))
+	n.serverMux.HandleFunc(STATUS_ENDPOINT, WebsocketHandler(n.GetNodeStatus))
 	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, n.HandleTransportRequest)
 	if n.world != nil {
-		n.serverMux.Handle(WORLD_ENDPOINT, websocket.Handler(n.world.Stream))
+		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(n.world.Stream))
 	}
 
 	go func() {
@@ -258,18 +302,23 @@ func (n *Node) Start(ctx context.Context) {
 	}()
 }
 
-func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string) {
-	connection, err := websocket.Dial(websocketUrl, "", origin)
-	if err != nil {
-		log.Fatal(fmt.Sprintf("%v Connect: ", n), err)
+func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string) error {
+	dialer := websocket.Dialer{}
+	connection, response, err := dialer.DialContext(ctx, websocketUrl, http.Header{})
+	if err != nil || response.StatusCode != 101 {
+		return fmt.Errorf("%v Connect: %w", n, err)
 	}
 	n.Lock()
 	defer n.Unlock()
+	conn := &Connection{
+		Conn: connection,
+	}
 	n.edges = append(n.edges, &Edge{
-		workConnection: connection,
+		workConnection: conn,
 		transportUrl:   transportUrl,
 	})
-	go n.ProcessIncomingWorkResponses(ctx, connection)
+	go n.ProcessIncomingWorkResponses(ctx, conn)
+	return nil
 }
 
 func ConnectNodes(ctx context.Context, node1, node2 *Node) {
@@ -313,7 +362,7 @@ func (n *Node) RemoveWorker(worker Worker) {
 	worker.SetOrgan(nil)
 }
 
-func (n *Node) ProcessIncomingWorkRequests(connection *websocket.Conn) {
+func (n *Node) ProcessIncomingWorkRequests(connection *Connection) {
 	defer connection.Close()
 	for {
 		select {
@@ -388,7 +437,7 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	})
 }
 
-func (n *Node) GetNodeStatus(connection *websocket.Conn) {
+func (n *Node) GetNodeStatus(connection *Connection) {
 	defer connection.Close()
 	ticker := time.NewTicker(STATUS_SOCKET_CLOCK_RATE)
 	for {
@@ -529,7 +578,7 @@ func (n *Node) SendDiffusion() {
 	}
 }
 
-func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *websocket.Conn) {
+func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *Connection) {
 	for {
 		select {
 		case <-ctx.Done():

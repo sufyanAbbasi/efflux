@@ -7,8 +7,6 @@ import (
 	"image/color"
 	"math/rand"
 	"sync"
-
-	"golang.org/x/net/websocket"
 )
 
 type RenderID string
@@ -89,7 +87,7 @@ func (w *World) Start(ctx context.Context) {
 	}
 }
 
-func (w *World) Stream(connection *websocket.Conn) {
+func (w *World) Stream(connection *Connection) {
 	defer connection.Close()
 	for {
 		select {
@@ -99,7 +97,7 @@ func (w *World) Stream(connection *websocket.Conn) {
 			r := make(chan RenderableData)
 			w.streamingChan <- r
 			for renderable := range r {
-				err := websocket.JSON.Send(connection, renderable)
+				err := connection.WriteJSON(renderable)
 				if err != nil {
 					fmt.Println(err)
 					return
