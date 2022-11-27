@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/color"
+	"image/png"
+	"math"
 	"math/rand"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 type RenderID string
@@ -39,7 +44,7 @@ type World struct {
 func InitializeWorld(ctx context.Context) *World {
 	world := &World{
 		ctx:           ctx,
-		bounds:        image.Rect(-WORLD_BOUNDS, -WORLD_BOUNDS, WORLD_BOUNDS, WORLD_BOUNDS),
+		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
 		streamingChan: make(chan chan RenderableData),
 		rootMatrix: &ExtracellularMatrix{
 			RWMutex: sync.RWMutex{},
@@ -94,13 +99,32 @@ func (w *World) Stream(connection *Connection) {
 		case <-w.ctx.Done():
 			return
 		default:
+			buf := new(bytes.Buffer)
+			err := png.Encode(buf, w.rootMatrix)
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					fmt.Printf("error: %v", err)
+				}
+				break
+
+			}
+			img_bytes := buf.Bytes()
+			err = connection.WriteMessage(websocket.BinaryMessage, img_bytes)
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					fmt.Printf("error: %v", err)
+				}
+				break
+			}
 			r := make(chan RenderableData)
 			w.streamingChan <- r
 			for renderable := range r {
 				err := connection.WriteJSON(renderable)
 				if err != nil {
-					fmt.Println(err)
-					return
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+						fmt.Printf("error: %v", err)
+					}
+					break
 				}
 			}
 		}
@@ -126,7 +150,7 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 }
 
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
-	if x%10 == 0 || y%10 == 0 {
+	if x%10 == 0 || y%10 == 0 || float64(x+1) == math.Abs(WORLD_BOUNDS/2) || float64(y+1) == math.Abs(WORLD_BOUNDS/2) {
 		return color.Black
 	}
 	return color.White

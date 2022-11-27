@@ -190,12 +190,12 @@ class Node {
         if (!scene) {
             render(html`<a-scene embedded>
                 <a-assets>
-                    <img id="background" src="acanthocytes.jpg">
+                    <img id="background" src="background.png">
                 </a-assets>
                 <a-sky color="white"></a-sky>
                 ${Array(WORLD_PLANES).fill(null).map((_, i) => html`
                     <a-plane
-                        material="src:#background; repeat: 5 5; opacity: 0.5"
+                        material="src:#background; repeat: 1 1; opacity: 0.5"
                         height="100"
                         width="100"
                         position="0 0 ${-5 * i}"
@@ -262,6 +262,21 @@ class Render {
     }
 
     getRender({data}) {
+        if (data instanceof Blob) {
+            const url = URL.createObjectURL(data);
+            const img = new Image();
+            img.src = url;
+            img.onload = function() {
+                const texture = document.querySelector('a-plane').getObject3D('mesh')?.material.map;
+                const prevUrl = texture.image?.src;
+                texture.image = img;
+                texture.needsUpdate = true;
+                if (typeof prevUrl == 'string' && prevUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(prevUrl);
+                }
+            }
+            return;
+        }
         let renderData;
         try {
             renderData = JSON.parse(data);

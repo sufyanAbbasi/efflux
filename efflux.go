@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	MakeBaseImage().Download()
 	ctx, cancel := context.WithCancel(context.Background())
 	// Setting up signal capturing
 	signalChan := make(chan os.Signal, 1)
@@ -41,5 +42,4 @@ func main() {
 	}
 	<-signalChan // second signal, hard exit
 	os.Exit(2)
-
 }
