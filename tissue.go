@@ -7,9 +7,9 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"math"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -58,7 +58,9 @@ func InitializeWorld(ctx context.Context) *World {
 			attached: make(map[RenderID]*Renderable),
 		},
 	}
-	world.rootMatrix.world = world
+	root := world.rootMatrix
+	root.world = world
+	root.walls = root.GenerateWalls(WALL_LINES, WALL_BOXES)
 	return world
 }
 
@@ -137,6 +139,7 @@ type ExtracellularMatrix struct {
 	level    int
 	next     *ExtracellularMatrix
 	prev     *ExtracellularMatrix
+	walls    []image.Rectangle
 	render   *Renderable
 	attached map[RenderID]*Renderable
 }
@@ -150,10 +153,83 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 }
 
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
-	if x%10 == 0 || y%10 == 0 || float64(x+1) == math.Abs(WORLD_BOUNDS/2) || float64(y+1) == math.Abs(WORLD_BOUNDS/2) {
-		return color.Black
+	for _, b := range m.walls {
+		if image.Pt(x, y).In(b) {
+			return color.White
+		}
 	}
-	return color.White
+	return color.Black
+}
+
+func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) []image.Rectangle {
+	bounds := m.world.bounds
+	randInRange := func(x, y int) int {
+		var min, max int
+		if x < y {
+			min = x
+			max = y
+		} else {
+			min = y
+			max = x
+		}
+		if min == max {
+			return min
+		}
+		rand.Seed(time.Now().UnixNano())
+		if min < 0 && max < 0 {
+			return rand.Intn(-min+max) + min
+		} else {
+			return rand.Intn(max-min) + min
+		}
+	}
+	makeRandPoint := func(rect image.Rectangle) image.Point {
+		x0 := randInRange(rect.Min.X, rect.Max.X)
+		y0 := randInRange(rect.Min.Y, rect.Max.Y)
+		return image.Pt(x0, y0)
+	}
+	makeRandPointOnLine := func(p0, p1 image.Point) image.Point {
+		if p0.X == p1.X {
+			return image.Pt(p0.X, randInRange(p0.Y, p1.Y))
+		}
+		m := (p1.Y - p0.Y) / (p1.X - p0.X)
+		x := randInRange(p0.X, p0.X)
+		y := (p1.Y-p0.Y)*m + p0.Y
+		return image.Pt(x, y)
+	}
+	makeRandRect := func(rect image.Rectangle) image.Rectangle {
+		x0 := randInRange(rect.Min.X, rect.Max.X)
+		y0 := randInRange(rect.Min.Y, rect.Max.Y)
+		x1 := randInRange(rect.Min.X, rect.Max.X)
+		y1 := randInRange(rect.Min.Y, rect.Max.Y)
+		return image.Rect(x0, y0, x1, y1).Intersect(bounds)
+	}
+	var walls []image.Rectangle
+	for i := 0; i < numLines; i++ {
+		p0 := makeRandPoint(bounds)
+		for j := 0; j < numBoxesPerLine; j++ {
+			p1 := makeRandPoint(bounds)
+			p2 := makeRandPointOnLine(p0, p1)
+			wall := makeRandRect(bounds)
+			if !p2.In(wall) {
+				wall = wall.Add(wall.Min.Sub(p2)).Intersect(bounds)
+			}
+			walls = append(walls, wall)
+			p0 = p1
+		}
+	}
+	var final []image.Rectangle
+	for _, wall := range walls {
+		hasOverlap := false
+		for _, checkWall := range walls {
+			if wall != checkWall && checkWall.Overlaps(wall) {
+				hasOverlap = true
+			}
+		}
+		if hasOverlap {
+			final = append(final, wall)
+		}
+	}
+	return final
 }
 
 func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {

@@ -196,15 +196,15 @@ class Node {
                 ${Array(WORLD_PLANES).fill(null).map((_, i) => html`
                     <a-plane
                         material="src:#background; repeat: 1 1; opacity: 0.5"
-                        height="100"
-                        width="100"
+                        height="10"
+                        width="10"
                         position="0 0 ${-5 * i}"
                         rotation="0 0 0">
                     </a-plane>
                 `)}
                 <a-camera
                     id="camera"
-                    position="0 0 10">
+                    position="0 0 5">
                 </a-camera>
             </a-scene>
             <button class="close" @click="${() => {
@@ -237,6 +237,7 @@ class Render {
 
     async setupRenderConnection(address) {
         const socket = new WebSocket(address + '/render')
+        this.socket = socket;
         try {
             this.processRenderSocket(await new Promise((resolve, reject) => {
                 socket.onopen = () => {
@@ -251,13 +252,11 @@ class Render {
 
     processRenderSocket(socket) {
         console.log('Connected Render:', this.node.address);
-        this.socket = socket;
         socket.onmessage = (event) => {
             this.getRender(event);
         }
         socket.onclose = () => {
             console.log('Closed Render:', this.node.address);
-            this.node.collapseScene();
         };
     }
 
@@ -299,7 +298,7 @@ class Render {
                 <a-sphere
                     id="${id}"
                     class="cell"
-                    radius="0.25"
+                    radius="0.1"
                     color="red"
                     position="${x} ${y} 0">
                 </a-sphere>
