@@ -1,6 +1,7 @@
 import {html, render} from 'https://unpkg.com/lit-html?module';
 
 const NodeMap = new Map();
+const PendingCloseSockets = new WeakMap();
 
 const WORLD_PLANES = 1;
 
@@ -182,8 +183,11 @@ class Node {
         optgroup.appendChild(container.firstElementChild);
     }
 
-    renderScene() {
-        this.collapseScene();
+    async renderScene() {
+        if (!this.render) {
+            this.render = new Render(this);
+        }
+        await this.collapseScene();
         const renderContainer = document.querySelector('.render')
         renderContainer.classList.add('show')
         let scene = document.querySelector('.render a-scene');
@@ -204,60 +208,83 @@ class Node {
                 `)}
                 <a-camera
                     id="camera"
-                    position="0 0 5">
+                    position="0 0 10">
                 </a-camera>
             </a-scene>
-            <button class="close" @click="${() => {
-                this.collapseScene();
-            }}">Close</button>`, renderContainer);
+            <div class="close-container"></div>`, renderContainer);
         }
-        this.render = new Render(this);
+        this.setUpScene();
+        document.querySelector('.render').classList.add('show');
+        await this.render.setupRenderConnection(this.address);
     }
 
-    collapseScene() {
+    async collapseScene() {
         // May be called multiple times.
         const elements = document.querySelectorAll('.cell');
         for (const el of elements) {
             el.parent?.removeChild();
         }
+        try {
+            const texture = document.querySelector('a-plane').getObject3D('mesh')?.material.map;
+            texture.image = document.querySelector('#background');
+            texture.needsUpdate = true;
+        } catch(e) {
+            // Pass.
+        }
+        await this.render?.close();
         const renderContainer = document.querySelector('.render')
-        renderContainer.classList.remove('show')
-        this.render?.socket?.close();
-        this.render = null
+        renderContainer?.classList?.remove('show')
+        document.querySelector('.close')?.remove();
+    }
+
+    setUpScene() {
+        const container = document.createElement('div');
+        render(html`<button class="close" @click="${() => {
+            this.collapseScene();
+        }}">Close</button>`, container);
+        document.querySelector('.close-container').appendChild(container.firstElementChild);
     }
 }
 
 class Render {
     constructor(node) {
         this.node = node;
-        this.socket = null;
-        this.render = null;
-        this.setupRenderConnection(node.address);
+        this.activeSocket = null;
     }
 
     async setupRenderConnection(address) {
         const socket = new WebSocket(address + '/render')
-        this.socket = socket;
         try {
-            this.processRenderSocket(await new Promise((resolve, reject) => {
+            await new Promise((resolve, reject) => {
                 socket.onopen = () => {
                     resolve(socket);
                 };
-                socket.onclose = reject;
-            }));
+                socket.onerror = reject;
+            });
+            console.log('Connected Render:', this.node.address);
+            this.activeSocket = socket;
+            socket.onmessage = (event) => {
+                this.getRender(event);
+            }
+            const closePromise = new Promise((resolve) => {
+                socket.onclose = () => {
+                    PendingCloseSockets.delete(socket);
+                    console.log('Closed Render:', this.node.address);
+                    resolve();
+                };
+            });
+            PendingCloseSockets.set(socket, closePromise);
         } catch (err) {
             console.error('Connection refused:', address, err);
+            socket.close();
         }
     }
 
-    processRenderSocket(socket) {
-        console.log('Connected Render:', this.node.address);
-        socket.onmessage = (event) => {
-            this.getRender(event);
-        }
-        socket.onclose = () => {
-            console.log('Closed Render:', this.node.address);
-        };
+    close() {
+        const toClose = this.activeSocket; 
+        this.activeSocket = null;
+        toClose?.close();
+        return PendingCloseSockets.get(toClose);
     }
 
     getRender({data}) {

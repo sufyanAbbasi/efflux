@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -95,7 +96,17 @@ func (w *World) Start(ctx context.Context) {
 }
 
 func (w *World) Stream(connection *Connection) {
+	fmt.Println("Render socket opened")
 	defer connection.Close()
+	go func(c *Connection) {
+		defer connection.Close()
+		for {
+			if _, _, err := c.NextReader(); err != nil {
+				fmt.Println("Render socket closed")
+				return
+			}
+		}
+	}(connection)
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -106,8 +117,10 @@ func (w *World) Stream(connection *Connection) {
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					fmt.Printf("error: %v", err)
+				} else {
+					fmt.Println("Render socket closed")
 				}
-				break
+				return
 
 			}
 			img_bytes := buf.Bytes()
@@ -115,8 +128,10 @@ func (w *World) Stream(connection *Connection) {
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					fmt.Printf("error: %v", err)
+				} else {
+					fmt.Println("Render socket closed")
 				}
-				break
+				return
 			}
 			r := make(chan RenderableData)
 			w.streamingChan <- r
@@ -125,12 +140,47 @@ func (w *World) Stream(connection *Connection) {
 				if err != nil {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 						fmt.Printf("error: %v", err)
+					} else {
+						fmt.Println("Render socket closed")
 					}
-					break
+					return
 				}
 			}
 		}
 	}
+}
+
+type Circle struct {
+	center image.Point
+	radius int
+}
+
+func (c Circle) InBounds(pt image.Point) bool {
+	diff := pt.Sub(c.center)
+	return math.Sqrt(float64(diff.X*diff.X)+float64(diff.Y*diff.Y)) < float64(c.radius)
+}
+
+type Walls struct {
+	boundaries []image.Rectangle
+	bubbles    []Circle
+}
+
+func (w *Walls) InBounds(x, y int) bool {
+	pt := image.Pt(x, y)
+	inBounds := false
+	for _, b := range w.boundaries {
+		if pt.In(b) {
+			inBounds = true
+		}
+	}
+	if inBounds {
+		for _, b := range w.bubbles {
+			if b.InBounds(pt) {
+				inBounds = false
+			}
+		}
+	}
+	return inBounds
 }
 
 type ExtracellularMatrix struct {
@@ -139,7 +189,7 @@ type ExtracellularMatrix struct {
 	level    int
 	next     *ExtracellularMatrix
 	prev     *ExtracellularMatrix
-	walls    []image.Rectangle
+	walls    *Walls
 	render   *Renderable
 	attached map[RenderID]*Renderable
 }
@@ -153,15 +203,14 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 }
 
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
-	for _, b := range m.walls {
-		if image.Pt(x, y).In(b) {
-			return color.White
-		}
+	if m.walls.InBounds(x, y) {
+		return color.White
 	}
+
 	return color.Black
 }
 
-func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) []image.Rectangle {
+func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *Walls {
 	bounds := m.world.bounds
 	randInRange := func(x, y int) int {
 		var min, max int
@@ -203,33 +252,37 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) [
 		y1 := randInRange(rect.Min.Y, rect.Max.Y)
 		return image.Rect(x0, y0, x1, y1).Intersect(bounds)
 	}
-	var walls []image.Rectangle
+	var boundaries []image.Rectangle
 	for i := 0; i < numLines; i++ {
 		p0 := makeRandPoint(bounds)
 		for j := 0; j < numBoxesPerLine; j++ {
 			p1 := makeRandPoint(bounds)
 			p2 := makeRandPointOnLine(p0, p1)
-			wall := makeRandRect(bounds)
-			if !p2.In(wall) {
-				wall = wall.Add(wall.Min.Sub(p2)).Intersect(bounds)
+			boundary := makeRandRect(bounds)
+			if !p2.In(boundary) {
+				boundary = boundary.Add(boundary.Min.Sub(p2)).Intersect(bounds)
 			}
-			walls = append(walls, wall)
+			boundaries = append(boundaries, boundary)
 			p0 = p1
 		}
 	}
-	var final []image.Rectangle
-	for _, wall := range walls {
+	var finalBoundaries []image.Rectangle
+	var circles []Circle
+	for _, boundary := range boundaries {
 		hasOverlap := false
-		for _, checkWall := range walls {
-			if wall != checkWall && checkWall.Overlaps(wall) {
+		for _, checkboundary := range boundaries {
+			if boundary != checkboundary && checkboundary.Overlaps(boundary) {
 				hasOverlap = true
 			}
 		}
 		if hasOverlap {
-			final = append(final, wall)
+			finalBoundaries = append(finalBoundaries, boundary)
+			circles = append(circles, Circle{boundary.Min, randInRange(1, boundary.Dx()/2)})
+			circles = append(circles, Circle{boundary.Max, randInRange(1, boundary.Dy()/2)})
 		}
 	}
-	return final
+
+	return &Walls{finalBoundaries, circles}
 }
 
 func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {
