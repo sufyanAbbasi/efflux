@@ -277,8 +277,16 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 		}
 		if hasOverlap {
 			finalBoundaries = append(finalBoundaries, boundary)
-			circles = append(circles, Circle{boundary.Min, randInRange(1, boundary.Dx()/2)})
-			circles = append(circles, Circle{boundary.Max, randInRange(1, boundary.Dy()/2)})
+			minX := boundary.Dx() / 2
+			if minX > WORLD_BOUNDS/2 {
+				minX = WORLD_BOUNDS / 2
+			}
+			minY := boundary.Dy() / 2
+			if minY > WORLD_BOUNDS/2 {
+				minY = WORLD_BOUNDS / 2
+			}
+			circles = append(circles, Circle{boundary.Min, randInRange(1, minX)})
+			circles = append(circles, Circle{boundary.Max, randInRange(1, minY)})
 		}
 	}
 

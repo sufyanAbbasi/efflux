@@ -220,9 +220,8 @@ class Node {
 
     async collapseScene() {
         // May be called multiple times.
-        const elements = document.querySelectorAll('.cell');
-        for (const el of elements) {
-            el.parent?.removeChild();
+        for (const el of document.querySelectorAll('.cell')) {
+            el.remove();
         }
         try {
             const texture = document.querySelector('a-plane').getObject3D('mesh')?.material.map;
