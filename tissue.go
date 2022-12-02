@@ -122,7 +122,7 @@ func (w *World) Stream(connection *Connection) {
 				fmt.Printf("Error while encoding png: %v", err)
 				return
 			}
-			img, err := MakeTitledPng(buf, string(w.rootMatrix.render.id))
+			img, err := MakeTitledPng(buf, w.rootMatrix.RenderMetadata())
 			if err != nil {
 				fmt.Printf("Error while encoding png: %v", err)
 				return
@@ -211,6 +211,10 @@ func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	}
 
 	return color.Black
+}
+
+func (m *ExtracellularMatrix) RenderMetadata() string {
+	return fmt.Sprintf("{\"z\":\"%02v\",\"id\":\"%v\"}", m.level, string(m.render.id))
 }
 
 func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *Walls {

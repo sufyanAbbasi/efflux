@@ -274,19 +274,25 @@ class Render {
             const img = new Image();
             img.src = url;
             const socket = this.activeSocket;
-            Promise.all([data.slice(data.size - 30, data.size - 16).text(), new Promise((resolve) => {
+            Promise.all([data.slice(data.size - 48, data.size - 16).text(), new Promise((resolve) => {
                 img.onload = resolve;
-            })]).then(([id]) => {
+            })]).then(([metadataJSON]) => {
                 if (socket !== this.activeSocket) {
                     return;
                 }
+                try {
+                    metadataJSON = JSON.parse(metadataJSON);
+                } catch(e) {
+                    console.error('Unable to parse metadata JSON', e);
+                    return
+                }
+                let {id, z} = metadataJSON;
+                z = parseInt(z);
                 // e.g. <a-plane material="src:#background; repeat: 1 1; opacity: 0.5"></a-plane>
                 const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
                 let el = document.querySelector(`#${id}`);
                 if (!el) {
                     const container = document.createElement('div');
-                    // TODO: Determine a Z value.
-                    const z = 1;
                     render(html`
                     <a-plane
                         id="${id}"
