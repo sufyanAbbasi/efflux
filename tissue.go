@@ -115,16 +115,15 @@ func (w *World) Stream(connection *Connection) {
 			buf := new(bytes.Buffer)
 			err := png.Encode(buf, w.rootMatrix)
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					fmt.Printf("error: %v", err)
-				} else {
-					fmt.Println("Render socket closed")
-				}
+				fmt.Printf("Error while encoding png: %v", err)
 				return
-
 			}
-			img_bytes := buf.Bytes()
-			err = connection.WriteMessage(websocket.BinaryMessage, img_bytes)
+			img, err := MakeTitledPng(buf, string(w.rootMatrix.render.id))
+			if err != nil {
+				fmt.Printf("Error while encoding png: %v", err)
+				return
+			}
+			err = connection.WriteMessage(websocket.BinaryMessage, img.Bytes())
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					fmt.Printf("error: %v", err)
