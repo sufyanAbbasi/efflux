@@ -17,6 +17,10 @@ import (
 
 type RenderID string
 
+func MakeRenderId(idPrefix string) RenderID {
+	return RenderID(fmt.Sprintf("%v%08v", idPrefix, rand.Intn(100000000)))
+}
+
 type Renderable struct {
 	id      RenderID
 	visible bool
@@ -51,7 +55,7 @@ func InitializeWorld(ctx context.Context) *World {
 			RWMutex: sync.RWMutex{},
 			level:   0,
 			render: &Renderable{
-				id:      RenderID(fmt.Sprintf("Matrix%v", rand.Intn(1000000))),
+				id:      MakeRenderId("Matrix"),
 				visible: true,
 				x:       0,
 				y:       0,
@@ -67,7 +71,7 @@ func InitializeWorld(ctx context.Context) *World {
 
 func (w *World) MakeNewRenderAndAttach(idPrefix string) *Renderable {
 	render := &Renderable{
-		id:      RenderID(fmt.Sprintf("%v%v", idPrefix, rand.Intn(1000000))),
+		id:      MakeRenderId(idPrefix),
 		visible: true,
 		x:       0,
 		y:       0,

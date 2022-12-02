@@ -3,8 +3,6 @@ import {html, render} from 'https://unpkg.com/lit-html?module';
 const NodeMap = new Map();
 const PendingCloseSockets = new WeakMap();
 
-const WORLD_PLANES = 1;
-
 const cy = cytoscape({
 
     container: document.querySelector('.graph'), // container to render in
@@ -197,15 +195,6 @@ class Node {
                     <img id="background" src="background.png">
                 </a-assets>
                 <a-sky color="white"></a-sky>
-                ${Array(WORLD_PLANES).fill(null).map((_, i) => html`
-                    <a-plane
-                        material="src:#background; repeat: 1 1; opacity: 0.5"
-                        height="10"
-                        width="10"
-                        position="0 0 ${-5 * i}"
-                        rotation="0 0 0">
-                    </a-plane>
-                `)}
                 <a-camera
                     id="camera"
                     position="0 0 10">
@@ -220,15 +209,8 @@ class Node {
 
     async collapseScene() {
         // May be called multiple times.
-        for (const el of document.querySelectorAll('.cell')) {
+        for (const el of document.querySelectorAll('.disposable')) {
             el.remove();
-        }
-        try {
-            const texture = document.querySelector('a-plane').getObject3D('mesh')?.material.map;
-            texture.image = document.querySelector('#background');
-            texture.needsUpdate = true;
-        } catch(e) {
-            // Pass.
         }
         await this.render?.close();
         const renderContainer = document.querySelector('.render')
@@ -291,15 +273,50 @@ class Render {
             const url = URL.createObjectURL(data);
             const img = new Image();
             img.src = url;
-            img.onload = function() {
-                const texture = document.querySelector('a-plane').getObject3D('mesh')?.material.map;
-                const prevUrl = texture.image?.src;
-                texture.image = img;
-                texture.needsUpdate = true;
-                if (typeof prevUrl == 'string' && prevUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(prevUrl);
+            const socket = this.activeSocket;
+            Promise.all([data.slice(data.size - 30, data.size - 16).text(), new Promise((resolve) => {
+                img.onload = resolve;
+            })]).then(([id]) => {
+                if (socket !== this.activeSocket) {
+                    return;
                 }
-            }
+                // e.g. <a-plane material="src:#background; repeat: 1 1; opacity: 0.5"></a-plane>
+                const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
+                let el = document.querySelector(`#${id}`);
+                if (!el) {
+                    const container = document.createElement('div');
+                    // TODO: Determine a Z value.
+                    const z = 1;
+                    render(html`
+                    <a-plane
+                        id="${id}"
+                        class="texture ${textureType} disposable"
+                        material="src:#background; repeat: 1 1; opacity: 0.5"
+                        height="10"
+                        width="10"
+                        position="0 0 ${-5 * z}"
+                        rotation="0 0 0">
+                    </a-plane>
+                    `, container);
+                    el = container.firstElementChild;
+                    const scene = document.querySelector('a-scene');
+                    if (!scene) {
+                        return;
+                    }
+                    scene.appendChild(el);
+                }
+                try {
+                    const texture = el.getObject3D('mesh')?.material.map;
+                    const prevUrl = texture.image?.src;
+                    texture.image = img;
+                    texture.needsUpdate = true;
+                    if (typeof prevUrl == 'string' && prevUrl.startsWith('blob:')) {
+                        URL.revokeObjectURL(prevUrl);
+                    }
+                } catch(e) {
+                    // Pass.
+                }
+            });
             return;
         }
         let renderData;
@@ -323,7 +340,7 @@ class Render {
             render(html`
                 <a-sphere
                     id="${id}"
-                    class="cell"
+                    class="cell disposable"
                     radius="0.1"
                     color="red"
                     position="${x} ${y} 0">
@@ -332,7 +349,10 @@ class Render {
             el = container.firstElementChild;
             const planes = document.querySelectorAll('a-plane');
             const plane = planes[z] || planes[0];
-            plane?.appendChild(el);
+            if (!plane) {
+                return;
+            }
+            plane.appendChild(el);
         }
         if (el.object3D) {
             el.object3D.visible = visible;

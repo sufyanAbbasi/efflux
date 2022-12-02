@@ -52,7 +52,7 @@ func MakeTitledPng(pngBuf *bytes.Buffer, title string) (*bytes.Buffer, error) {
 func WriteChunk(buf *bytes.Buffer, b []byte, name string) error {
 	n := uint32(len(b))
 	if int(n) != len(b) {
-		return fmt.Errorf("%v chunk is too large: ", name, strconv.Itoa(len(b)))
+		return fmt.Errorf("%v chunk is too large: %v", name, strconv.Itoa(len(b)))
 	}
 	header := [8]byte{}
 	binary.BigEndian.PutUint32(header[:4], n)
