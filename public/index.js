@@ -271,12 +271,18 @@ class Render {
     getRender({data}) {
         if (data instanceof Blob) {
             const url = URL.createObjectURL(data);
-            const img = new Image();
-            img.src = url;
             const socket = this.activeSocket;
-            Promise.all([data.slice(data.size - 48, data.size - 16).text(), new Promise((resolve) => {
-                img.onload = resolve;
-            })]).then(([metadataJSON]) => {
+            const textureLoaded = new Promise((resolve, reject) => {
+                const loader = new THREE.TextureLoader();
+                loader.load(url, 
+                //onLoadCallback
+                resolve,
+                // onProgressCallback - not sure if working
+                undefined,
+                // onErrorCallback
+                reject);
+            });
+            Promise.all([data.slice(data.size - 48, data.size - 16).text(), textureLoaded]).then(([metadataJSON, texture]) => {
                 if (socket !== this.activeSocket) {
                     return;
                 }
@@ -312,10 +318,11 @@ class Render {
                     scene.appendChild(el);
                 }
                 try {
-                    const texture = el.getObject3D('mesh')?.material.map;
                     const prevUrl = texture.image?.src;
-                    texture.image = img;
-                    texture.needsUpdate = true;
+                    const mesh = el.getObject3D('mesh');
+                    if (mesh) {
+                        mesh.material.map = texture
+                    }
                     if (typeof prevUrl == 'string' && prevUrl.startsWith('blob:')) {
                         URL.revokeObjectURL(prevUrl);
                     }

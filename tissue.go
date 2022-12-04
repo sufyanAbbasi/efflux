@@ -51,9 +51,20 @@ func InitializeWorld(ctx context.Context) *World {
 		ctx:           ctx,
 		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
 		streamingChan: make(chan chan RenderableData),
-		rootMatrix: &ExtracellularMatrix{
+	}
+	world.BuildWorld()
+	return world
+}
+
+func (w *World) BuildWorld() {
+	var curr *ExtracellularMatrix
+	for i := 0; i < NUM_PLANES; i++ {
+		curr = &ExtracellularMatrix{
 			RWMutex: sync.RWMutex{},
-			level:   0,
+			world:   w,
+			level:   i,
+			prev:    curr,
+			next:    nil,
 			render: &Renderable{
 				id:      MakeRenderId("Matrix"),
 				visible: true,
@@ -61,12 +72,17 @@ func InitializeWorld(ctx context.Context) *World {
 				y:       0,
 			},
 			attached: make(map[RenderID]*Renderable),
-		},
+		}
+		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
+		if curr.prev != nil {
+			curr.prev.next = curr
+		}
 	}
-	root := world.rootMatrix
-	root.world = world
-	root.walls = root.GenerateWalls(WALL_LINES, WALL_BOXES)
-	return world
+	// Walk back to set next and find root.
+	for curr.prev != nil {
+		curr = curr.prev
+	}
+	w.rootMatrix = curr
 }
 
 func (w *World) MakeNewRenderAndAttach(idPrefix string) *Renderable {
@@ -116,26 +132,7 @@ func (w *World) Stream(connection *Connection) {
 		case <-w.ctx.Done():
 			return
 		default:
-			buf := new(bytes.Buffer)
-			err := png.Encode(buf, w.rootMatrix)
-			if err != nil {
-				fmt.Printf("Error while encoding png: %v", err)
-				return
-			}
-			img, err := MakeTitledPng(buf, w.rootMatrix.RenderMetadata())
-			if err != nil {
-				fmt.Printf("Error while encoding png: %v", err)
-				return
-			}
-			err = connection.WriteMessage(websocket.BinaryMessage, img.Bytes())
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					fmt.Printf("error: %v", err)
-				} else {
-					fmt.Println("Render socket closed")
-				}
-				return
-			}
+			w.StreamMatrices(connection)
 			r := make(chan RenderableData)
 			w.streamingChan <- r
 			for renderable := range r {
@@ -150,6 +147,33 @@ func (w *World) Stream(connection *Connection) {
 				}
 			}
 		}
+	}
+}
+
+func (w *World) StreamMatrices(connection *Connection) {
+	matrix := w.rootMatrix
+	for matrix != nil {
+		buf := new(bytes.Buffer)
+		err := png.Encode(buf, matrix)
+		if err != nil {
+			fmt.Printf("Error while encoding png: %v", err)
+			return
+		}
+		img, err := MakeTitledPng(buf, matrix.RenderMetadata())
+		if err != nil {
+			fmt.Printf("Error while encoding png: %v", err)
+			return
+		}
+		err = connection.WriteMessage(websocket.BinaryMessage, img.Bytes())
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				fmt.Printf("error: %v", err)
+			} else {
+				fmt.Println("Render socket closed")
+			}
+			return
+		}
+		matrix = matrix.next
 	}
 }
 
