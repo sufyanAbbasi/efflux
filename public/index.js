@@ -294,7 +294,7 @@ class Render {
                 }
                 let {id, z} = metadataJSON;
                 z = parseInt(z);
-                // e.g. <a-plane material="src:#background; repeat: 1 1; opacity: 0.5"></a-plane>
+                // e.g. <a-plane material="src:#background; repeat: 1 1;"></a-plane>
                 const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
                 let el = document.querySelector(`#${id}`);
                 if (!el) {
@@ -303,7 +303,7 @@ class Render {
                     <a-plane
                         id="${id}"
                         class="texture ${textureType} disposable"
-                        material="src:#background; repeat: 1 1; opacity: 0.5"
+                        material="src:#background; repeat: 1 1;"
                         height="10"
                         width="10"
                         position="0 0 ${-5 * z}"

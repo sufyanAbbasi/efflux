@@ -130,7 +130,7 @@ func (c *Cell) IncurDamage(damage int) {
 
 func (c *Cell) Apoptosis() {
 	c.render.visible = false
-	c.organ.world.Detach(c.render)
+	c.organ.tissue.Detach(c.render)
 	c.organ = nil
 }
 
@@ -316,7 +316,7 @@ func (c *Cell) ProduceWaste() {
 }
 
 func (c *Cell) Render() {
-	c.render = c.organ.world.MakeNewRenderAndAttach(c.cellType.String())
+	c.render = c.organ.tissue.MakeNewRenderAndAttach(c.cellType.String())
 }
 
 type EukaryoticCell struct {

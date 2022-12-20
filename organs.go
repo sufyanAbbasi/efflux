@@ -192,7 +192,7 @@ type Node struct {
 	transportUrl string
 	managers     map[WorkType]*WorkManager
 	materialPool *MaterialPool
-	world        *World
+	tissue       *Tissue
 }
 
 var currentPort = 7999
@@ -216,12 +216,12 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
 		websocketUrl: websocketUrl,
 		transportUrl: transportUrl,
 		managers:     make(map[WorkType]*WorkManager),
-		world:        InitializeWorld(ctx),
+		tissue:       InitializeTissue(ctx),
 	}
 	node.materialPool = InitializeMaterialPool()
 	graph.allNodes[url] = node
 	node.Start(ctx)
-	go node.world.Start(ctx)
+	go node.tissue.Start(ctx)
 	return node
 }
 
@@ -278,8 +278,8 @@ func (n *Node) Start(ctx context.Context) {
 	n.serverMux.HandleFunc(WORK_ENDPOINT, WebsocketHandler(n.ProcessIncomingWorkRequests))
 	n.serverMux.HandleFunc(STATUS_ENDPOINT, WebsocketHandler(n.GetNodeStatus))
 	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, n.HandleTransportRequest)
-	if n.world != nil {
-		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(n.world.Stream))
+	if n.tissue != nil {
+		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(n.tissue.Stream))
 	}
 
 	go func() {
