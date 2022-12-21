@@ -124,7 +124,7 @@ func (c *Cell) Repair(damage int) {
 }
 
 func (c *Cell) IncurDamage(damage int) {
-	c.damage += damage
+	c.damage += int(damage)
 	fmt.Println("Damaged:", c, "in", c.organ)
 }
 
@@ -357,6 +357,13 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 	}
 	fmt.Println("Spawned:", cell, "in", cell.organ)
 	return CellActor(cell)
+}
+
+func (e *EukaryoticCell) IncurDamage(damage int) {
+	e.Cell.IncurDamage(damage)
+	if e.organ != nil && e.organ.tissue != nil && e.organ.tissue.rootMatrix != nil {
+		e.organ.tissue.rootMatrix.AddCytokine(e.render, cell_damage, CYTOKINE_CELL_DAMAGE)
+	}
 }
 
 func (e *EukaryoticCell) Apoptosis() {

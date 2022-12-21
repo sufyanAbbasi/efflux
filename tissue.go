@@ -53,7 +53,6 @@ func InitializeTissue(ctx context.Context) *Tissue {
 		streamingChan: make(chan chan RenderableData),
 	}
 	tissue.BuildTissue()
-	tissue.GenerateCytokines()
 	return tissue
 }
 
@@ -72,7 +71,8 @@ func (t *Tissue) BuildTissue() {
 				x:       0,
 				y:       0,
 			},
-			attached: make(map[RenderID]*Renderable),
+			attached:    make(map[RenderID]*Renderable),
+			cytokineMap: make(map[image.Point]*Cytokines),
 		}
 		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
 		if curr.prev != nil {
@@ -84,17 +84,6 @@ func (t *Tissue) BuildTissue() {
 		curr = curr.prev
 	}
 	t.rootMatrix = curr
-}
-
-func (t *Tissue) GenerateCytokines() {
-	matrix := t.rootMatrix
-	for matrix != nil {
-		for i := 10; i > 0; i-- {
-			matrix.cytokines = append(matrix.cytokines,
-				MakeCytokine(cell_damage, MakeRandPoint(t.bounds), 255))
-		}
-		matrix = matrix.next
-	}
 }
 
 func (t *Tissue) MakeNewRenderAndAttach(idPrefix string) *Renderable {
@@ -195,16 +184,11 @@ func (t *Tissue) StreamMatrices(connection *Connection) {
 func (t *Tissue) Tick() {
 	matrix := t.rootMatrix
 	for matrix != nil {
-		matrix.Lock()
-		var cytokines []*Cytokine
-		for _, c := range matrix.cytokines {
+		matrix.cytokineMu.RLock()
+		for _, c := range matrix.cytokineMap {
 			c.Tick()
-			if !c.dissipated {
-				cytokines = append(cytokines, c)
-			}
 		}
-		matrix.cytokines = cytokines
-		matrix.Unlock()
+		matrix.cytokineMu.RUnlock()
 		matrix = matrix.next
 	}
 }
@@ -248,14 +232,15 @@ func (w *Walls) InBounds(x, y int) bool {
 
 type ExtracellularMatrix struct {
 	sync.RWMutex
-	tissue    *Tissue
-	level     int
-	next      *ExtracellularMatrix
-	prev      *ExtracellularMatrix
-	walls     *Walls
-	cytokines []*Cytokine
-	render    *Renderable
-	attached  map[RenderID]*Renderable
+	tissue      *Tissue
+	level       int
+	next        *ExtracellularMatrix
+	prev        *ExtracellularMatrix
+	walls       *Walls
+	cytokineMap map[image.Point]*Cytokines
+	cytokineMu  sync.RWMutex
+	render      *Renderable
+	attached    map[RenderID]*Renderable
 }
 
 func (m *ExtracellularMatrix) ColorModel() color.Model {
@@ -269,9 +254,11 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	if m.walls.InBounds(x, y) {
 		concentration := 0
-		for _, c := range m.cytokines {
-			concentration += int(c.At(image.Point{x, y}))
+		m.cytokineMu.RLock()
+		for _, c := range m.cytokineMap {
+			concentration += int(c.At(cell_damage, image.Point{x, y}))
 		}
+		m.cytokineMu.RUnlock()
 		if concentration > 0 {
 			if concentration > math.MaxUint8 {
 				concentration = math.MaxUint8
@@ -286,92 +273,6 @@ func (m *ExtracellularMatrix) At(x, y int) color.Color {
 
 func (m *ExtracellularMatrix) RenderMetadata() string {
 	return fmt.Sprintf("{\"z\":\"%02v\",\"id\":\"%v\"}", m.level, string(m.render.id))
-}
-
-func RandInRange(x, y int) int {
-	var min, max int
-	if x < y {
-		min = x
-		max = y
-	} else {
-		min = y
-		max = x
-	}
-	if min == max {
-		return min
-	}
-	rand.Seed(time.Now().UnixNano())
-	if min < 0 && max < 0 {
-		return rand.Intn(-min+max) + min
-	} else {
-		return rand.Intn(max-min) + min
-	}
-}
-
-func MakeRandPoint(rect image.Rectangle) image.Point {
-	x0 := RandInRange(rect.Min.X, rect.Max.X)
-	y0 := RandInRange(rect.Min.Y, rect.Max.Y)
-	return image.Pt(x0, y0)
-}
-
-func MakeRandPointOnLine(p0, p1 image.Point) image.Point {
-	if p0.X == p1.X {
-		return image.Pt(p0.X, RandInRange(p0.Y, p1.Y))
-	}
-	m := (p1.Y - p0.Y) / (p1.X - p0.X)
-	x := RandInRange(p0.X, p0.X)
-	y := (p1.Y-p0.Y)*m + p0.Y
-	return image.Pt(x, y)
-}
-func MakeRandRect(rect image.Rectangle) image.Rectangle {
-	x0 := RandInRange(rect.Min.X, rect.Max.X)
-	y0 := RandInRange(rect.Min.Y, rect.Max.Y)
-	x1 := RandInRange(rect.Min.X, rect.Max.X)
-	y1 := RandInRange(rect.Min.Y, rect.Max.Y)
-	return image.Rect(x0, y0, x1, y1).Intersect(rect)
-}
-
-func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *Walls {
-	bounds := m.tissue.bounds
-	var boundaries []image.Rectangle
-	for i := 0; i < numLines; i++ {
-		p0 := MakeRandPoint(bounds)
-		for j := 0; j < numBoxesPerLine; j++ {
-			p1 := MakeRandPoint(bounds)
-			p2 := MakeRandPointOnLine(p0, p1)
-			boundary := MakeRandRect(bounds)
-			if !p2.In(boundary) {
-				boundary = boundary.Add(boundary.Min.Sub(p2)).Intersect(bounds)
-			}
-			boundaries = append(boundaries, boundary)
-			p0 = p1
-		}
-	}
-	var finalBoundaries []image.Rectangle
-	var circles []Circle
-	for _, boundary := range boundaries {
-		hasOverlap := false
-		for _, checkboundary := range boundaries {
-			if boundary != checkboundary && checkboundary.Overlaps(boundary) {
-				hasOverlap = true
-			}
-		}
-		if hasOverlap {
-			finalBoundaries = append(finalBoundaries, boundary)
-			minX := boundary.Dx() / 2
-			if minX > WORLD_BOUNDS/2 {
-				minX = WORLD_BOUNDS / 2
-			}
-			minY := boundary.Dy() / 2
-			if minY > WORLD_BOUNDS/2 {
-				minY = WORLD_BOUNDS / 2
-			}
-			circles = append(circles, Circle{boundary.Min, RandInRange(1, minX)})
-			circles = append(circles, Circle{boundary.Max, RandInRange(1, minY)})
-		}
-	}
-
-	return &Walls{finalBoundaries, circles}
 }
 
 func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {
@@ -448,4 +349,85 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) RenderableData {
 		Y:       r.y,
 		Z:       m.level,
 	}
+}
+
+func (m *ExtracellularMatrix) AddCytokine(r *Renderable, t CytokineType, concentration uint8) uint8 {
+	_, hasRender := m.attached[r.id]
+	if hasRender {
+		pt := image.Point{r.x, r.y}
+		m.cytokineMu.Lock()
+		c, hasPoint := m.cytokineMap[pt]
+		if !hasPoint {
+			c = MakeCytokine(pt, make(map[CytokineType]uint8))
+			m.cytokineMap[pt] = c
+		}
+		m.cytokineMu.Unlock()
+		return c.Add(t, concentration)
+	}
+	if m.next != nil {
+		return m.next.AddCytokine(r, t, concentration)
+	}
+	return 0
+}
+
+func (m *ExtracellularMatrix) RemoveCytokine(r *Renderable, t CytokineType, concentration uint8) uint8 {
+	_, hasRender := m.attached[r.id]
+	if hasRender {
+		pt := image.Point{r.x, r.y}
+		m.cytokineMu.Lock()
+		c, hasPoint := m.cytokineMap[pt]
+		if !hasPoint {
+			c = MakeCytokine(pt, make(map[CytokineType]uint8))
+			m.cytokineMap[pt] = c
+		}
+		m.cytokineMu.Unlock()
+		return c.Sub(t, concentration)
+	}
+	if m.next != nil {
+		return m.next.RemoveCytokine(r, t, concentration)
+	}
+	return 0
+}
+
+func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *Walls {
+	bounds := m.tissue.bounds
+	var boundaries []image.Rectangle
+	for i := 0; i < numLines; i++ {
+		p0 := MakeRandPoint(bounds)
+		for j := 0; j < numBoxesPerLine; j++ {
+			p1 := MakeRandPoint(bounds)
+			p2 := MakeRandPointOnLine(p0, p1)
+			boundary := MakeRandRect(bounds)
+			if !p2.In(boundary) {
+				boundary = boundary.Add(boundary.Min.Sub(p2)).Intersect(bounds)
+			}
+			boundaries = append(boundaries, boundary)
+			p0 = p1
+		}
+	}
+	var finalBoundaries []image.Rectangle
+	var circles []Circle
+	for _, boundary := range boundaries {
+		hasOverlap := false
+		for _, checkboundary := range boundaries {
+			if boundary != checkboundary && checkboundary.Overlaps(boundary) {
+				hasOverlap = true
+			}
+		}
+		if hasOverlap {
+			finalBoundaries = append(finalBoundaries, boundary)
+			minX := boundary.Dx() / 2
+			if minX > WORLD_BOUNDS/2 {
+				minX = WORLD_BOUNDS / 2
+			}
+			minY := boundary.Dy() / 2
+			if minY > WORLD_BOUNDS/2 {
+				minY = WORLD_BOUNDS / 2
+			}
+			circles = append(circles, Circle{boundary.Min, RandInRange(1, minX)})
+			circles = append(circles, Circle{boundary.Max, RandInRange(1, minY)})
+		}
+	}
+
+	return &Walls{finalBoundaries, circles}
 }

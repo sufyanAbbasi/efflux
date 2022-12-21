@@ -10,8 +10,10 @@ import (
 	"image/png"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"strconv"
+	"time"
 )
 
 type BaseImage struct {
@@ -101,4 +103,47 @@ func MakeBaseImage() BaseImage {
 	return BaseImage{
 		bounds: image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
 	}
+}
+
+func RandInRange(x, y int) int {
+	var min, max int
+	if x < y {
+		min = x
+		max = y
+	} else {
+		min = y
+		max = x
+	}
+	if min == max {
+		return min
+	}
+	rand.Seed(time.Now().UnixNano())
+	if min < 0 && max < 0 {
+		return rand.Intn(-min+max) + min
+	} else {
+		return rand.Intn(max-min) + min
+	}
+}
+
+func MakeRandPoint(rect image.Rectangle) image.Point {
+	x0 := RandInRange(rect.Min.X, rect.Max.X)
+	y0 := RandInRange(rect.Min.Y, rect.Max.Y)
+	return image.Pt(x0, y0)
+}
+
+func MakeRandPointOnLine(p0, p1 image.Point) image.Point {
+	if p0.X == p1.X {
+		return image.Pt(p0.X, RandInRange(p0.Y, p1.Y))
+	}
+	m := (p1.Y - p0.Y) / (p1.X - p0.X)
+	x := RandInRange(p0.X, p0.X)
+	y := (p1.Y-p0.Y)*m + p0.Y
+	return image.Pt(x, y)
+}
+func MakeRandRect(rect image.Rectangle) image.Rectangle {
+	x0 := RandInRange(rect.Min.X, rect.Max.X)
+	y0 := RandInRange(rect.Min.Y, rect.Max.Y)
+	x1 := RandInRange(rect.Min.X, rect.Max.X)
+	y1 := RandInRange(rect.Min.Y, rect.Max.Y)
+	return image.Rect(x0, y0, x1, y1).Intersect(rect)
 }
