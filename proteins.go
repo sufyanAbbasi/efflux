@@ -72,6 +72,8 @@ type CellActor interface {
 	IsAerobic() bool
 	IsOxygenated() bool
 	Oxygenate(bool)
+	CanMove() bool
+	Move(dx, dy, dz int)
 }
 
 type StateNode struct {
@@ -103,6 +105,20 @@ func hasOrganOrDie(ctx context.Context, cell CellActor) bool {
 
 func DoWork(ctx context.Context, cell CellActor) bool {
 	cell.Organ().MakeAvailable(cell)
+	return true
+}
+
+func MoveRandomly(ctx context.Context, cell CellActor) bool {
+	dz := 0
+	if rand.Intn(10) == 0 {
+		dz = 1 - rand.Intn(3)
+	}
+	cell.Move(1-rand.Intn(3), 1-rand.Intn(3), dz)
+	return true
+}
+
+func Move(ctx context.Context, cell CellActor) bool {
+	cell.Move(0, 0, 0)
 	return true
 }
 
@@ -432,6 +448,15 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		}
 		currNode = currNode.next
 	}
+	if c.CanMove() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   Move,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
 	currNode.next = &StateNode{
 		function: &ProteinFunction{
 			action:   WillMitosisAndRepair,
@@ -514,6 +539,15 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 		},
 	}
 	currNode = currNode.next
+	if c.CanMove() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   MoveRandomly,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
 	currNode.next = &StateNode{
 		next: s.root, // Back to beginning.
 		function: &ProteinFunction{

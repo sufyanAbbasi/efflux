@@ -197,7 +197,7 @@ class Node {
                 <a-sky color="white"></a-sky>
                 <a-camera
                     id="camera"
-                    position="0 0 10">
+                    position="0 0 50">
                 </a-camera>
             </a-scene>
             <div class="close-container"></div>`, renderContainer);
@@ -304,9 +304,9 @@ class Render {
                         id="${id}"
                         class="texture ${textureType} disposable"
                         material="src:#background; repeat: 1 1;"
-                        height="10"
-                        width="10"
-                        position="0 0 ${-5 * z}"
+                        height="100"
+                        width="100"
+                        position="0 0 ${-30 * z}"
                         rotation="0 0 0">
                     </a-plane>
                     `, container);
@@ -354,7 +354,7 @@ class Render {
                 <a-sphere
                     id="${id}"
                     class="cell disposable"
-                    radius="0.1"
+                    radius="1"
                     color="red"
                     position="${x} ${y} 0">
                 </a-sphere>

@@ -83,6 +83,13 @@ func (c *Cell) SetOrgan(node *Node) {
 	c.organ = node
 }
 
+func (c *Cell) Tissue() *Tissue {
+	if c.organ == nil || c.organ.tissue == nil || c.organ.tissue.rootMatrix == nil {
+		return nil
+	}
+	return c.organ.tissue
+}
+
 func (c *Cell) DNA() *DNA {
 	return c.dna
 }
@@ -315,8 +322,28 @@ func (c *Cell) ProduceWaste() {
 	}
 }
 
-func (c *Cell) Render() {
-	c.render = c.organ.tissue.MakeNewRenderAndAttach(c.cellType.String())
+func (c *Cell) CanMove() bool {
+	return false
+}
+
+func (c *Cell) Move(dx, dy, dz int) {
+	if c.render == nil {
+		return
+	}
+	c.render.targetX += dx
+	c.render.targetY += dy
+	c.render.targetZ += dz
+	tissue := c.Tissue()
+	if tissue != nil {
+		tissue.Move(c.render)
+	}
+}
+
+func (c *Cell) Render() *Renderable {
+	if c.render == nil && c.Tissue() != nil {
+		c.render = c.Tissue().MakeNewRenderAndAttach(c.cellType.String())
+	}
+	return c.render
 }
 
 type EukaryoticCell struct {
@@ -361,8 +388,9 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.Cell.IncurDamage(damage)
-	if e.organ != nil && e.organ.tissue != nil && e.organ.tissue.rootMatrix != nil {
-		e.organ.tissue.rootMatrix.AddCytokine(e.render, cell_damage, CYTOKINE_CELL_DAMAGE)
+	tissue := e.Tissue()
+	if tissue != nil {
+		tissue.rootMatrix.AddCytokine(e.render, cell_damage, CYTOKINE_CELL_DAMAGE)
 	}
 }
 
@@ -469,6 +497,10 @@ func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {
 	}
 }
 
+func (p *ProkaryoticCell) CanMove() bool {
+	return true
+}
+
 func (p *ProkaryoticCell) IsAerobic() bool {
 	switch p.cellType {
 	case Bacteroidota:
@@ -520,6 +552,10 @@ func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
 		fmt.Println("Passes:", c)
 		return true
 	}
+}
+
+func (i *Leukocyte) CanMove() bool {
+	return true
 }
 
 type TCell struct {

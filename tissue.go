@@ -22,9 +22,10 @@ func MakeRenderId(idPrefix string) RenderID {
 }
 
 type Renderable struct {
-	id      RenderID
-	visible bool
-	x, y    int
+	id                        RenderID
+	visible                   bool
+	x, y                      int
+	targetX, targetY, targetZ int
 }
 
 type RenderableData struct {
@@ -70,6 +71,9 @@ func (t *Tissue) BuildTissue() {
 				visible: true,
 				x:       0,
 				y:       0,
+				targetX: 0,
+				targetY: 0,
+				targetZ: 0,
 			},
 			attached:     make(map[RenderID]*Renderable),
 			cytokinesMap: make(map[image.Point]Cytokines),
@@ -92,6 +96,9 @@ func (t *Tissue) MakeNewRenderAndAttach(idPrefix string) *Renderable {
 		visible: true,
 		x:       0,
 		y:       0,
+		targetX: 0,
+		targetY: 0,
+		targetZ: 0,
 	}
 	t.Attach(render)
 	return render
@@ -195,6 +202,26 @@ func (t *Tissue) Tick() {
 	}
 }
 
+func (t *Tissue) FindMatrix(r *Renderable) *ExtracellularMatrix {
+	m := t.rootMatrix
+	found := false
+	for m != nil && !found {
+		m.Lock()
+		_, found = m.attached[r.id]
+		m.Unlock()
+		m = m.next
+	}
+	return m
+}
+
+func (t *Tissue) Move(r *Renderable) {
+	m := t.FindMatrix(r)
+	if m == nil {
+		return
+	}
+	m.Move(r)
+}
+
 type Walls struct {
 	boundaries []image.Rectangle
 	bubbles    []Circle
@@ -289,6 +316,50 @@ func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {
 	}
 }
 
+func (m *ExtracellularMatrix) ConstrainTargetBounds(r *Renderable) {
+	b := m.tissue.bounds
+	if r.targetX > b.Max.X {
+		r.targetX = b.Max.X
+	}
+	if r.targetX < b.Min.X {
+		r.targetX = b.Min.X
+	}
+	if r.targetY > b.Max.Y {
+		r.targetY = b.Max.Y
+	}
+	if r.targetY < b.Min.Y {
+		r.targetY = b.Min.Y
+	}
+	if r.targetZ < 0 {
+		r.targetZ = 0
+	}
+	if r.targetZ > NUM_PLANES-1 {
+		r.targetZ = NUM_PLANES - 1
+	}
+}
+
+func (m *ExtracellularMatrix) Move(r *Renderable) {
+	m.ConstrainTargetBounds(r)
+	if r.targetX > r.x {
+		m.MoveX(r, 1)
+	}
+	if r.targetX < r.x {
+		m.MoveX(r, -1)
+	}
+	if r.targetY > r.y {
+		m.MoveY(r, 1)
+	}
+	if r.targetY < r.y {
+		m.MoveY(r, -1)
+	}
+	if r.targetZ > m.level {
+		m.MoveUp(r)
+	}
+	if r.targetZ < m.level {
+		m.MoveDown(r)
+	}
+}
+
 func (m *ExtracellularMatrix) MoveX(r *Renderable, x int) {
 	r.x += x
 	m.ConstrainBounds(r)
@@ -302,7 +373,7 @@ func (m *ExtracellularMatrix) MoveY(r *Renderable, y int) {
 func (m *ExtracellularMatrix) MoveUp(r *Renderable) {
 	if m.prev != nil {
 		m.Detach(r)
-		m.Attach(r)
+		m.prev.Attach(r)
 		m.prev.ConstrainBounds(r)
 	}
 }
@@ -310,7 +381,7 @@ func (m *ExtracellularMatrix) MoveUp(r *Renderable) {
 func (m *ExtracellularMatrix) MoveDown(r *Renderable) {
 	if m.next != nil {
 		m.Detach(r)
-		m.Attach(r)
+		m.next.Attach(r)
 		m.next.ConstrainBounds(r)
 	}
 }
@@ -323,13 +394,8 @@ func (m *ExtracellularMatrix) Attach(r *Renderable) {
 
 func (m *ExtracellularMatrix) Detach(r *Renderable) {
 	m.Lock()
-	_, hasRender := m.attached[r.id]
-	if hasRender {
-		delete(m.attached, r.id)
-	} else if m.next != nil {
-		m.next.Detach(r)
-	}
-	m.Unlock()
+	defer m.Unlock()
+	delete(m.attached, r.id)
 }
 
 func (m *ExtracellularMatrix) Render(renderChan chan RenderableData) {
