@@ -71,8 +71,8 @@ func (t *Tissue) BuildTissue() {
 				x:       0,
 				y:       0,
 			},
-			attached:    make(map[RenderID]*Renderable),
-			cytokineMap: make(map[image.Point]*Cytokines),
+			attached:     make(map[RenderID]*Renderable),
+			cytokinesMap: make(map[image.Point]Cytokines),
 		}
 		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
 		if curr.prev != nil {
@@ -185,35 +185,29 @@ func (t *Tissue) Tick() {
 	matrix := t.rootMatrix
 	for matrix != nil {
 		matrix.cytokineMu.RLock()
-		for _, c := range matrix.cytokineMap {
-			c.Tick()
+		for _, cytokines := range matrix.cytokinesMap {
+			for _, c := range cytokines {
+				c.Tick()
+			}
 		}
 		matrix.cytokineMu.RUnlock()
 		matrix = matrix.next
 	}
 }
 
-type Circle struct {
-	center image.Point
-	radius int
-}
-
-func (c Circle) Distance(pt image.Point) float64 {
-	diff := pt.Sub(c.center)
-	return math.Sqrt(float64(diff.X*diff.X) + float64(diff.Y*diff.Y))
-}
-
-func (c Circle) InBounds(pt image.Point) bool {
-	return c.Distance(pt) < float64(c.radius)
-}
-
 type Walls struct {
 	boundaries []image.Rectangle
 	bubbles    []Circle
+	bridges    []Line
 }
 
 func (w *Walls) InBounds(x, y int) bool {
 	pt := image.Pt(x, y)
+	for _, b := range w.bridges {
+		if b.InBounds(pt) {
+			return true
+		}
+	}
 	inBounds := false
 	for _, b := range w.boundaries {
 		if pt.In(b) {
@@ -232,15 +226,15 @@ func (w *Walls) InBounds(x, y int) bool {
 
 type ExtracellularMatrix struct {
 	sync.RWMutex
-	tissue      *Tissue
-	level       int
-	next        *ExtracellularMatrix
-	prev        *ExtracellularMatrix
-	walls       *Walls
-	cytokineMap map[image.Point]*Cytokines
-	cytokineMu  sync.RWMutex
-	render      *Renderable
-	attached    map[RenderID]*Renderable
+	tissue       *Tissue
+	level        int
+	next         *ExtracellularMatrix
+	prev         *ExtracellularMatrix
+	walls        *Walls
+	cytokinesMap map[image.Point]Cytokines
+	cytokineMu   sync.RWMutex
+	render       *Renderable
+	attached     map[RenderID]*Renderable
 }
 
 func (m *ExtracellularMatrix) ColorModel() color.Model {
@@ -255,8 +249,12 @@ func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	if m.walls.InBounds(x, y) {
 		concentration := 0
 		m.cytokineMu.RLock()
-		for _, c := range m.cytokineMap {
-			concentration += int(c.At(cell_damage, image.Point{x, y}))
+		for _, cytokines := range m.cytokinesMap {
+			c, hasCytokine := cytokines[cell_damage]
+			if hasCytokine {
+				concentration += int(c.At(image.Point{x, y}))
+
+			}
 		}
 		m.cytokineMu.RUnlock()
 		if concentration > 0 {
@@ -351,18 +349,30 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) RenderableData {
 	}
 }
 
+func (m *ExtracellularMatrix) GetCytokines(pt image.Point) Cytokines {
+	m.cytokineMu.Lock()
+	defer m.cytokineMu.Unlock()
+	cytokines, hasPoint := m.cytokinesMap[pt]
+	if !hasPoint {
+		cytokines = make(map[CytokineType]*Cytokine)
+		m.cytokinesMap[pt] = cytokines
+	}
+	return cytokines
+}
+
 func (m *ExtracellularMatrix) AddCytokine(r *Renderable, t CytokineType, concentration uint8) uint8 {
 	_, hasRender := m.attached[r.id]
 	if hasRender {
 		pt := image.Point{r.x, r.y}
+		cytokines := m.GetCytokines(pt)
 		m.cytokineMu.Lock()
-		c, hasPoint := m.cytokineMap[pt]
-		if !hasPoint {
-			c = MakeCytokine(pt, make(map[CytokineType]uint8))
-			m.cytokineMap[pt] = c
+		c, hasCytokine := cytokines[t]
+		if !hasCytokine {
+			c = MakeCytokine(pt, t, concentration)
+			cytokines[t] = c
 		}
 		m.cytokineMu.Unlock()
-		return c.Add(t, concentration)
+		return c.Add(concentration)
 	}
 	if m.next != nil {
 		return m.next.AddCytokine(r, t, concentration)
@@ -375,13 +385,12 @@ func (m *ExtracellularMatrix) RemoveCytokine(r *Renderable, t CytokineType, conc
 	if hasRender {
 		pt := image.Point{r.x, r.y}
 		m.cytokineMu.Lock()
-		c, hasPoint := m.cytokineMap[pt]
-		if !hasPoint {
-			c = MakeCytokine(pt, make(map[CytokineType]uint8))
-			m.cytokineMap[pt] = c
+		cytokines := m.GetCytokines(pt)
+		c, hasCytokine := cytokines[t]
+		if !hasCytokine {
+			return 0
 		}
-		m.cytokineMu.Unlock()
-		return c.Sub(t, concentration)
+		return c.Sub(concentration)
 	}
 	if m.next != nil {
 		return m.next.RemoveCytokine(r, t, concentration)
@@ -396,7 +405,8 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 		p0 := MakeRandPoint(bounds)
 		for j := 0; j < numBoxesPerLine; j++ {
 			p1 := MakeRandPoint(bounds)
-			p2 := MakeRandPointOnLine(p0, p1)
+			l := Line{p0, p1, LINE_WIDTH}
+			p2 := l.GetRandPoint()
 			boundary := MakeRandRect(bounds)
 			if !p2.In(boundary) {
 				boundary = boundary.Add(boundary.Min.Sub(p2)).Intersect(bounds)
@@ -407,6 +417,7 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 	}
 	var finalBoundaries []image.Rectangle
 	var circles []Circle
+	var bridges []Line
 	for _, boundary := range boundaries {
 		hasOverlap := false
 		for _, checkboundary := range boundaries {
@@ -417,17 +428,16 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 		if hasOverlap {
 			finalBoundaries = append(finalBoundaries, boundary)
 			minX := boundary.Dx() / 2
-			if minX > WORLD_BOUNDS/2 {
-				minX = WORLD_BOUNDS / 2
+			if minX > MAX_RADIUS {
+				minX = MAX_RADIUS
 			}
 			minY := boundary.Dy() / 2
-			if minY > WORLD_BOUNDS/2 {
-				minY = WORLD_BOUNDS / 2
+			if minY > MAX_RADIUS {
+				minY = MAX_RADIUS
 			}
-			circles = append(circles, Circle{boundary.Min, RandInRange(1, minX)})
-			circles = append(circles, Circle{boundary.Max, RandInRange(1, minY)})
+			circles = append(circles, Circle{boundary.Min, RandInRange(2, minX)})
+			circles = append(circles, Circle{boundary.Max, RandInRange(2, minY)})
 		}
 	}
-
-	return &Walls{finalBoundaries, circles}
+	return &Walls{finalBoundaries, circles, bridges}
 }

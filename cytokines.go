@@ -8,6 +8,7 @@ import (
 )
 
 type CytokineType int
+type Cytokines map[CytokineType]*Cytokine
 
 const (
 	cell_damage CytokineType = iota
@@ -20,72 +21,72 @@ func Gaussian(sigma, x float64) float64 {
 	return (1 / (sigma * math.Sqrt(2*math.Pi))) * math.Exp(-0.5*math.Pow(x, 2)/math.Pow(sigma, 2))
 }
 
-type Cytokines struct {
+type Cytokine struct {
 	sync.RWMutex
 	Circle
-	concentrations  map[CytokineType]uint8
+	cytokine        CytokineType
+	concentration   uint8
 	lastTick        time.Time
 	tickRate        time.Duration
 	dissipationRate uint8
 }
 
-func MakeCytokine(pt image.Point, concentrations map[CytokineType]uint8) *Cytokines {
-	return &Cytokines{
+func MakeCytokine(pt image.Point, cytokine CytokineType, concentration uint8) *Cytokine {
+	return &Cytokine{
 		Circle: Circle{
 			center: pt,
 			radius: CYTOKINE_RADIUS,
 		},
-		concentrations:  concentrations,
+		cytokine:        cytokine,
+		concentration:   concentration,
 		lastTick:        time.Now(),
 		tickRate:        CYTOKINE_TICK_RATE,
 		dissipationRate: CYTOKINE_DISSIPATION_RATE,
 	}
 }
 
-func (c *Cytokines) Add(t CytokineType, x uint8) uint8 {
+func (c *Cytokine) Add(x uint8) uint8 {
 	c.Lock()
 	defer c.Unlock()
-	concentration := int(c.concentrations[t]) + int(x)
+	concentration := int(c.concentration) + int(x)
 	if concentration > math.MaxUint8-1 {
-		c.concentrations[t] = math.MaxUint8 - 1
+		c.concentration = math.MaxUint8 - 1
 	} else {
-		c.concentrations[t] = uint8(concentration)
+		c.concentration = uint8(concentration)
 	}
-	return c.concentrations[t]
+	return c.concentration
 }
 
-func (c *Cytokines) Sub(t CytokineType, x uint8) uint8 {
+func (c *Cytokine) Sub(x uint8) uint8 {
 	c.Lock()
 	defer c.Unlock()
-	if x > c.concentrations[t] {
-		c.concentrations[t] = 0
+	if x > c.concentration {
+		c.concentration = 0
 	} else {
-		c.concentrations[t] -= x
+		c.concentration -= x
 	}
-	return c.concentrations[t]
+	return c.concentration
 }
 
-func (c *Cytokines) Tick() {
+func (c *Cytokine) Tick() {
 	c.Lock()
 	defer c.Unlock()
 	currTime := time.Now()
 	if currTime.After(c.lastTick.Add(c.tickRate)) {
-		for t, concentration := range c.concentrations {
-			if concentration <= c.dissipationRate {
-				c.concentrations[t] = 0
-				c.radius = 0
-			} else {
-				c.concentrations[t] -= c.dissipationRate
-			}
+		if c.concentration <= c.dissipationRate {
+			c.concentration = 0
+			c.radius = 0
+		} else {
+			c.concentration -= c.dissipationRate
 		}
 		c.radius += CYTOKINE_EXPANSION_RATE
 		c.lastTick = currTime
 	}
 }
 
-func (c *Cytokines) At(t CytokineType, pt image.Point) uint8 {
+func (c *Cytokine) At(pt image.Point) uint8 {
 	c.RLock()
-	concentration := c.concentrations[t]
+	concentration := c.concentration
 	c.RUnlock()
 	if c.InBounds(pt) {
 		return uint8(math.Floor(float64(concentration) *

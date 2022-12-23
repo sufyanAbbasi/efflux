@@ -26,6 +26,9 @@ const WORLD_BOUNDS = 100
 const NUM_PLANES = 3
 const WALL_LINES = 15
 const WALL_BOXES = 3
+const LINE_WIDTH = 2
+const MIN_BOX_WIDTH = 10
+const MAX_RADIUS = WORLD_BOUNDS / 4
 
 const CYTOKINE_RADIUS = 1
 const CYTOKINE_TICK_RATE = 500 * time.Millisecond
