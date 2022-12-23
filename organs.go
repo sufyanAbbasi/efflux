@@ -93,14 +93,15 @@ type WorkStatusData struct {
 }
 
 type MaterialStatusData struct {
-	O2         int `json:"o2"`
-	Glucose    int `json:"glucose"`
-	Vitamin    int `json:"vitamin"`
-	Co2        int `json:"co2"`
-	Creatinine int `json:"creatinine"`
-	Growth     int `json:"growth"`
-	Hunger     int `json:"hunger"`
-	Asphyxia   int `json:"asphyxia"`
+	O2           int `json:"o2"`
+	Glucose      int `json:"glucose"`
+	Vitamin      int `json:"vitamin"`
+	Co2          int `json:"co2"`
+	Creatinine   int `json:"creatinine"`
+	Growth       int `json:"growth"`
+	Hunger       int `json:"hunger"`
+	Asphyxia     int `json:"asphyxia"`
+	Inflammation int `json:"inflammation"`
 }
 
 type TransportRequest struct {
@@ -469,14 +470,15 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				manager.Unlock()
 			}
 			materialStatus := MaterialStatusData{
-				O2:         n.materialPool.resourcePool.resources.o2,
-				Glucose:    n.materialPool.resourcePool.resources.glucose,
-				Vitamin:    n.materialPool.resourcePool.resources.vitamins,
-				Co2:        n.materialPool.wastePool.wastes.co2,
-				Creatinine: n.materialPool.wastePool.wastes.creatinine,
-				Growth:     n.materialPool.ligandPool.ligands.growth,
-				Hunger:     n.materialPool.ligandPool.ligands.hunger,
-				Asphyxia:   n.materialPool.ligandPool.ligands.asphyxia,
+				O2:           n.materialPool.resourcePool.resources.o2,
+				Glucose:      n.materialPool.resourcePool.resources.glucose,
+				Vitamin:      n.materialPool.resourcePool.resources.vitamins,
+				Co2:          n.materialPool.wastePool.wastes.co2,
+				Creatinine:   n.materialPool.wastePool.wastes.creatinine,
+				Growth:       n.materialPool.ligandPool.ligands.growth,
+				Hunger:       n.materialPool.ligandPool.ligands.hunger,
+				Asphyxia:     n.materialPool.ligandPool.ligands.asphyxia,
+				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,

@@ -12,8 +12,8 @@ type Cytokines map[CytokineType]*Cytokine
 
 const (
 	cell_damage CytokineType = iota
-	antigen_found
-	induce_inflammation
+	antigen_present
+	induce_inflammation // TNF, IL-1, IL-6
 	induce_chemotaxis
 )
 
