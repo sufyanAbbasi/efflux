@@ -176,13 +176,7 @@ func (t *Tissue) StreamMatrices(connection *Connection) {
 func (t *Tissue) Tick() {
 	matrix := t.rootMatrix
 	for matrix != nil {
-		matrix.cytokineMu.RLock()
-		for _, cytokines := range matrix.cytokinesMap {
-			for _, c := range cytokines {
-				c.Tick()
-			}
-		}
-		matrix.cytokineMu.RUnlock()
+		matrix.Tick()
 		matrix = matrix.next
 	}
 }
@@ -225,19 +219,36 @@ func (t *Tissue) ConsumeCytokines(r *Renderable, cType CytokineType, consumption
 }
 
 type Walls struct {
-	boundaries []image.Rectangle
-	bubbles    []Circle
-	bridges    []Line
+	sync.RWMutex
+	mainStage     Circle
+	boundaries    []image.Rectangle
+	bubbles       []Circle
+	bridges       []Line
+	inBoundsCache map[image.Point]bool
 }
 
-func (w *Walls) InBounds(x, y int) bool {
-	pt := image.Pt(x, y)
+func (w *Walls) InBounds(pt image.Point) bool {
+	w.RLock()
+	inBounds, hasPoint := w.inBoundsCache[pt]
+	w.RUnlock()
+	if hasPoint {
+		return inBounds
+	}
+	if w.mainStage.InBounds(pt) {
+		w.RLock()
+		w.inBoundsCache[pt] = true
+		w.RUnlock()
+		return true
+	}
 	for _, b := range w.bridges {
 		if b.InBounds(pt) {
+			w.RLock()
+			w.inBoundsCache[pt] = true
+			w.RUnlock()
 			return true
 		}
 	}
-	inBounds := false
+	inBounds = false
 	for _, b := range w.boundaries {
 		if pt.In(b) {
 			inBounds = true
@@ -250,6 +261,9 @@ func (w *Walls) InBounds(x, y int) bool {
 			}
 		}
 	}
+	w.RLock()
+	w.inBoundsCache[pt] = inBounds
+	w.RUnlock()
 	return inBounds
 }
 
@@ -275,8 +289,9 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 }
 
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
-	if m.walls.InBounds(x, y) {
-		pts := []image.Point{{x, y}}
+	pt := image.Point{x, y}
+	if m.walls.InBounds(pt) {
+		pts := []image.Point{pt}
 		cellDamageConcentration := m.GetCytokineContentrations(pts, cell_damage)[0]
 		chemotaxisConcentration := m.GetCytokineContentrations(pts, induce_chemotaxis)[0]
 
@@ -342,6 +357,27 @@ func (m *ExtracellularMatrix) ConstrainTargetBounds(r *Renderable) {
 	}
 }
 
+func (m *ExtracellularMatrix) Physics(r *Renderable) {
+	if !m.walls.InBounds(r.position) {
+		dx := 0
+		dy := 0
+		if r.position.X > m.walls.mainStage.center.X {
+			dx = -1
+		}
+		if r.position.X < m.walls.mainStage.center.X {
+			dx = 1
+		}
+		if r.position.Y > m.walls.mainStage.center.Y {
+			dy = -1
+		}
+		if r.position.Y < m.walls.mainStage.center.Y {
+			dy = 1
+		}
+		m.MoveX(r, dx)
+		m.MoveY(r, dy)
+	}
+}
+
 func (m *ExtracellularMatrix) Move(r *Renderable) {
 	m.ConstrainTargetBounds(r)
 	if r.targetX > r.position.X {
@@ -362,6 +398,7 @@ func (m *ExtracellularMatrix) Move(r *Renderable) {
 	if r.targetZ < m.level {
 		m.MoveDown(r)
 	}
+	m.Physics(r)
 }
 
 func (m *ExtracellularMatrix) MoveX(r *Renderable, x int) {
@@ -402,9 +439,34 @@ func (m *ExtracellularMatrix) Detach(r *Renderable) {
 	delete(m.attached, r.id)
 }
 
+func (m *ExtracellularMatrix) Tick() {
+	m.cytokineMu.RLock()
+	for _, cytokines := range m.cytokinesMap {
+		for _, c := range cytokines {
+			c.Tick()
+		}
+	}
+	m.cytokineMu.RUnlock()
+	m.RLock()
+	var renderables []*Renderable
+	for _, r := range m.attached {
+		renderables = append(renderables, r)
+	}
+	for _, r := range renderables {
+		m.Physics(r)
+	}
+	m.RUnlock()
+}
+
 func (m *ExtracellularMatrix) Render(renderChan chan RenderableData) {
-	for _, attached := range m.attached {
-		renderChan <- m.RenderObject(attached)
+	m.RLock()
+	var attached []*Renderable
+	for _, a := range m.attached {
+		attached = append(attached, a)
+	}
+	m.RUnlock()
+	for _, a := range attached {
+		renderChan <- m.RenderObject(a)
 	}
 	close(renderChan)
 }
@@ -429,11 +491,13 @@ func (m *ExtracellularMatrix) GetCytokineContentrations(pts []image.Point, t Cyt
 		c, hasCytokine := cytokines[t]
 		if hasCytokine {
 			for i, pt := range pts {
-				concentration := int(concentrations[i]) + int(c.At(pt))
-				if concentration > math.MaxUint8 {
-					concentrations[i] = math.MaxUint8
-				} else {
-					concentrations[i] = uint8(concentration)
+				if m.walls.InBounds(pt) {
+					concentration := int(concentrations[i]) + int(c.At(pt))
+					if concentration > math.MaxUint8 {
+						concentrations[i] = math.MaxUint8
+					} else {
+						concentrations[i] = uint8(concentration)
+					}
 				}
 			}
 		}
@@ -506,7 +570,7 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 		}
 	}
 	var finalBoundaries []image.Rectangle
-	var circles []Circle
+	var bubbles []Circle
 	var bridges []Line
 	for _, boundary := range boundaries {
 		hasOverlap := false
@@ -525,9 +589,16 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 			if minY > MAX_RADIUS {
 				minY = MAX_RADIUS
 			}
-			circles = append(circles, Circle{boundary.Min, RandInRange(2, minX)})
-			circles = append(circles, Circle{boundary.Max, RandInRange(2, minY)})
+			bubbles = append(bubbles, Circle{boundary.Min, RandInRange(2, minX)})
+			bubbles = append(bubbles, Circle{boundary.Max, RandInRange(2, minY)})
 		}
 	}
-	return &Walls{finalBoundaries, circles, bridges}
+	mainStage := Circle{image.Point{RandInRange(-5, 5), RandInRange(-5, 5)}, MAIN_STAGE_RADIUS}
+	return &Walls{
+		mainStage:     mainStage,
+		boundaries:    finalBoundaries,
+		bubbles:       bubbles,
+		bridges:       bridges,
+		inBoundsCache: make(map[image.Point]bool),
+	}
 }
