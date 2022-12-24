@@ -408,13 +408,6 @@ func (c *Cell) DropCytokine(t CytokineType, concentration uint8) uint8 {
 	return 0
 }
 
-func (c *Cell) Render() *Renderable {
-	if c.render == nil && c.Tissue() != nil {
-		c.render = c.Tissue().MakeNewRenderAndAttach(c.cellType.String())
-	}
-	return c.render
-}
-
 type EukaryoticCell struct {
 	*Cell
 	telomereLength int
@@ -424,7 +417,7 @@ type EukaryoticCell struct {
 func (e *EukaryoticCell) Start(ctx context.Context) {
 	e.function = e.dna.makeFunction(e)
 	go e.function.Run(ctx, e)
-	e.Render()
+	e.Tissue().Attach(e.render)
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -438,13 +431,13 @@ func (e *EukaryoticCell) HasTelomerase() bool {
 	return e.hasTelomerase
 }
 
-func (e *EukaryoticCell) Mitosis() CellActor {
+func (e *EukaryoticCell) Mitosis(ctx context.Context) CellActor {
 	if e.telomereLength <= 0 {
 		return nil
 	}
 	e.hasTelomerase = false
 	e.telomereLength--
-	cell := MakeEukaryoticStemCell(e.dna, e.cellType, e.workType)
+	cell := CopyEukaryoticStemCell(e)
 	cell.organ = e.organ
 	cell.telomereLength = e.telomereLength
 	cell.hasTelomerase = false
@@ -452,6 +445,7 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 		e.organ.AddWorker(cell)
 	}
 	fmt.Println("Spawned:", cell, "in", cell.organ)
+	defer cell.Start(ctx)
 	return CellActor(cell)
 }
 
@@ -491,13 +485,21 @@ func (e *EukaryoticCell) IsAerobic() bool {
 	return true
 }
 
-func MakeEukaryoticStemCell(dna *DNA, cellType CellType, workType WorkType) *EukaryoticCell {
+func CopyEukaryoticStemCell(base *EukaryoticCell) *EukaryoticCell {
 	return &EukaryoticCell{
 		Cell: &Cell{
-			cellType: cellType,
-			dna:      dna,
-			mhc_i:    dna.MHC_I(),
-			workType: workType,
+			cellType: base.cellType,
+			dna:      base.dna,
+			mhc_i:    base.dna.MHC_I(),
+			workType: base.workType,
+			render: &Renderable{
+				id:       MakeRenderId(base.cellType.String()),
+				visible:  true,
+				position: image.Point{base.render.position.X, base.render.position.Y},
+				targetX:  base.render.targetX,
+				targetY:  base.render.targetY,
+				targetZ:  base.render.targetZ,
+			},
 		},
 		telomereLength: TELOMERE_LENGTH,
 		hasTelomerase:  true,
@@ -511,9 +513,9 @@ type ProkaryoticCell struct {
 	energy             int
 }
 
-func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
+func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 	var generationTime time.Duration
-	switch cellType {
+	switch base.cellType {
 	case Bacteroidota:
 		generationTime = GUT_BACTERIA_GENERATION_DURATION
 	default:
@@ -521,9 +523,17 @@ func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
 	}
 	return &ProkaryoticCell{
 		Cell: &Cell{
-			cellType: cellType,
-			dna:      dna,
-			mhc_i:    dna.MHC_I(),
+			cellType: base.cellType,
+			dna:      base.dna,
+			mhc_i:    base.dna.MHC_I(),
+			render: &Renderable{
+				id:       MakeRenderId(base.cellType.String()),
+				visible:  true,
+				position: image.Point{base.render.position.X, base.render.position.Y},
+				targetX:  base.render.targetX,
+				targetY:  base.render.targetY,
+				targetZ:  base.render.targetZ,
+			},
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -533,7 +543,7 @@ func MakeProkaryoticCell(dna *DNA, cellType CellType) *ProkaryoticCell {
 func (p *ProkaryoticCell) Start(ctx context.Context) {
 	p.function = p.dna.makeFunction(p)
 	go p.function.Run(ctx, p)
-	p.Render()
+	p.Tissue().Attach(p.render)
 }
 
 func (p *ProkaryoticCell) HasTelomerase() bool {
@@ -548,11 +558,12 @@ func (p *ProkaryoticCell) WillMitosis() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) Mitosis() CellActor {
+func (p *ProkaryoticCell) Mitosis(ctx context.Context) CellActor {
 	p.lastGenerationTime = time.Now()
-	cell := MakeProkaryoticCell(p.dna, p.cellType)
+	cell := CopyProkaryoticCell(p)
 	cell.organ = p.organ
 	fmt.Println("Spawned:", cell, "in", cell.organ)
+	defer cell.Start(ctx)
 	return CellActor(cell)
 }
 
@@ -694,7 +705,13 @@ func MakeCellFromRequest(request TransportRequest) (CellActor, error) {
 	case Bacterial:
 		fallthrough
 	case Bacteroidota:
-		cell = MakeProkaryoticCell(dna, request.CellType)
+		cell = CopyProkaryoticCell(&ProkaryoticCell{
+			Cell: &Cell{
+				cellType: request.CellType,
+				dna:      dna,
+				render:   &Renderable{},
+			},
+		})
 	case RedBlood:
 		fallthrough
 	case Neuron:
@@ -714,7 +731,14 @@ func MakeCellFromRequest(request TransportRequest) (CellActor, error) {
 	case Dendritic:
 		fallthrough
 	default:
-		cell = MakeEukaryoticStemCell(dna, request.CellType, request.WorkType)
+		cell = CopyEukaryoticStemCell(&EukaryoticCell{
+			Cell: &Cell{
+				cellType: request.CellType,
+				dna:      dna,
+				workType: request.WorkType,
+				render:   &Renderable{},
+			},
+		})
 	}
 	return cell, nil
 }

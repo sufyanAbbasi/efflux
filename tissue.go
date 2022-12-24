@@ -89,19 +89,6 @@ func (t *Tissue) BuildTissue() {
 	t.rootMatrix = curr
 }
 
-func (t *Tissue) MakeNewRenderAndAttach(idPrefix string) *Renderable {
-	render := &Renderable{
-		id:       MakeRenderId(idPrefix),
-		visible:  true,
-		position: image.Point{0, 0},
-		targetX:  0,
-		targetY:  0,
-		targetZ:  0,
-	}
-	t.Attach(render)
-	return render
-}
-
 func (t *Tissue) Attach(r *Renderable) {
 	t.rootMatrix.Attach(r)
 }

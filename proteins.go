@@ -62,7 +62,7 @@ type CellActor interface {
 	Function() *StateDiagram
 	HasTelomerase() bool
 	WillMitosis() bool
-	Mitosis() CellActor
+	Mitosis(ctx context.Context) CellActor
 	CollectResources(context.Context) bool
 	ProduceWaste()
 	Damage() int
@@ -133,8 +133,7 @@ func MoveTowardsAntigenPresentCytokine(ctx context.Context, cell CellActor) bool
 func StemCellToSpecializedCell(ctx context.Context, cell CellActor) bool {
 	if cell.HasTelomerase() {
 		// Loses stem cell status after first mitosis, which is free.
-		c := cell.Mitosis()
-		c.Start(ctx)
+		cell.Mitosis(ctx)
 	}
 	return true
 }
@@ -161,8 +160,7 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 		resource.vitamins >= VITAMIN_COST_MITOSIS &&
 		cell.WillMitosis() {
 		resource.vitamins -= VITAMIN_COST_MITOSIS
-		c := cell.Mitosis()
-		c.Start(ctx)
+		cell.Mitosis(ctx)
 	}
 	return true
 }
@@ -493,7 +491,7 @@ func MoveAwayFromChemotaxisCytokineOrRandomly(ctx context.Context, cell CellActo
 
 func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	// Bacteria will not be allowed to repair itself.
-	// Three conditions for bacteria mitosis, may allow runaway growth:
+	// Conditions for bacteria mitosis, may allow runaway growth:
 	// - Enough internal energy (successful calls to Oxygenate)
 	// - Enough vitamin or glucose resources (not picky)
 	// - Enough time has passed
@@ -501,12 +499,10 @@ func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	defer cell.Organ().materialPool.PutResource(resource)
 	if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.WillMitosis() {
 		resource.glucose -= GLUCOSE_COST_MITOSIS
-		c := cell.Mitosis()
-		c.Start(ctx)
+		cell.Mitosis(ctx)
 	} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.WillMitosis() {
 		resource.vitamins -= VITAMIN_COST_MITOSIS
-		c := cell.Mitosis()
-		c.Start(ctx)
+		cell.Mitosis(ctx)
 	}
 	return true
 }
