@@ -356,7 +356,7 @@ class Render {
                     class="cell disposable"
                     radius="1"
                     color="red"
-                    position="${x} ${y} 0">
+                    position="${x} ${-y} 0">
                 </a-sphere>
             `, container);
             el = container.firstElementChild;
@@ -369,7 +369,7 @@ class Render {
         }
         if (el.object3D) {
             el.object3D.visible = visible;
-            el.object3D.position.set(x, y, z)
+            el.object3D.position.set(x, -y, z)
         }
     }
 }

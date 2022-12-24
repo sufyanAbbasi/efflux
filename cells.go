@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"log"
 	"reflect"
 	"sync"
@@ -339,6 +340,74 @@ func (c *Cell) Move(dx, dy, dz int) {
 	}
 }
 
+func (c *Cell) MoveToPoint(pt image.Point) {
+	if c.render == nil {
+		return
+	}
+	c.render.targetX = pt.X
+	c.render.targetY = pt.Y
+	tissue := c.Tissue()
+	if tissue != nil {
+		tissue.Move(c.render)
+	}
+}
+
+func (c *Cell) GetNearestCytokines(t CytokineType) (points []image.Point, concentrations []uint8) {
+	tissue := c.Tissue()
+	if tissue == nil {
+		return
+	}
+	x := c.render.position.X
+	x_plus := x + CYTOKINE_SENSE_RANGE
+	x_minus := x - CYTOKINE_SENSE_RANGE
+	y := c.render.position.Y
+	y_plus := y + CYTOKINE_SENSE_RANGE
+	y_minus := y - CYTOKINE_SENSE_RANGE
+	points = []image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
+	concentrations = tissue.rootMatrix.GetCytokineContentrations(points, t)
+	return
+}
+
+func (c *Cell) MoveTowardsCytokine(t CytokineType) bool {
+	points, concentrations := c.GetNearestCytokines(t)
+	maxIndex := -1
+	maxVal := uint8(0)
+	for i, v := range concentrations {
+		if v > maxVal {
+			maxVal = v
+			maxIndex = i
+		}
+	}
+	if maxIndex >= 0 {
+		c.MoveToPoint(points[maxIndex])
+	}
+	return maxIndex >= 0
+}
+
+func (c *Cell) MoveAwayFromCytokine(t CytokineType) bool {
+	points, concentrations := c.GetNearestCytokines(t)
+	minIndex := -1
+	minVal := uint8(0)
+	for i, v := range concentrations {
+		if v < minVal {
+			minVal = v
+			minIndex = i
+		}
+	}
+	if minIndex >= 0 {
+		c.MoveToPoint(points[minIndex])
+	}
+	return minIndex >= 0
+}
+
+func (c *Cell) DropCytokine(t CytokineType, concentration uint8) uint8 {
+	tissue := c.Tissue()
+	if tissue != nil {
+		return tissue.AddCytokine(c.render, t, concentration)
+	}
+	return 0
+}
+
 func (c *Cell) Render() *Renderable {
 	if c.render == nil && c.Tissue() != nil {
 		c.render = c.Tissue().MakeNewRenderAndAttach(c.cellType.String())
@@ -388,10 +457,7 @@ func (e *EukaryoticCell) Mitosis() CellActor {
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.Cell.IncurDamage(damage)
-	tissue := e.Tissue()
-	if tissue != nil {
-		tissue.rootMatrix.AddCytokine(e.render, cell_damage, CYTOKINE_CELL_DAMAGE)
-	}
+	e.DropCytokine(cell_damage, CYTOKINE_CELL_DAMAGE)
 }
 
 func (e *EukaryoticCell) Apoptosis() {

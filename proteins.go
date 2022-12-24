@@ -74,6 +74,8 @@ type CellActor interface {
 	Oxygenate(bool)
 	CanMove() bool
 	Move(dx, dy, dz int)
+	MoveTowardsCytokine(CytokineType) bool
+	MoveAwayFromCytokine(CytokineType) bool
 }
 
 type StateNode struct {
@@ -109,16 +111,22 @@ func DoWork(ctx context.Context, cell CellActor) bool {
 }
 
 func MoveRandomly(ctx context.Context, cell CellActor) bool {
-	dz := 0
-	if rand.Intn(10) == 0 {
-		dz = 1 - rand.Intn(3)
-	}
-	cell.Move(1-rand.Intn(3), 1-rand.Intn(3), dz)
+	cell.Move(1-rand.Intn(3), 1-rand.Intn(3), 0)
 	return true
 }
 
-func Move(ctx context.Context, cell CellActor) bool {
-	cell.Move(0, 0, 0)
+func MoveTowardsChemotaxisCytokine(ctx context.Context, cell CellActor) bool {
+	cell.MoveTowardsCytokine(induce_chemotaxis)
+	return true
+}
+
+func MoveTowardsCellDamangeCytokine(ctx context.Context, cell CellActor) bool {
+	cell.MoveTowardsCytokine(cell_damage)
+	return true
+}
+
+func MoveTowardsAntigenPresentCytokine(ctx context.Context, cell CellActor) bool {
+	cell.MoveTowardsCytokine(antigen_present)
 	return true
 }
 
@@ -451,7 +459,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	if c.CanMove() {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
-				action:   Move,
+				action:   MoveTowardsChemotaxisCytokine,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
@@ -475,6 +483,13 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 }
 
 // Bacteria Related CellActions
+
+func MoveAwayFromChemotaxisCytokineOrRandomly(ctx context.Context, cell CellActor) bool {
+	if !cell.MoveAwayFromCytokine(induce_chemotaxis) {
+		return MoveRandomly(ctx, cell)
+	}
+	return true
+}
 
 func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	// Bacteria will not be allowed to repair itself.
@@ -542,7 +557,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	if c.CanMove() {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
-				action:   MoveRandomly,
+				action:   MoveAwayFromChemotaxisCytokineOrRandomly,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}

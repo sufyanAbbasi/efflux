@@ -24,7 +24,7 @@ func MakeRenderId(idPrefix string) RenderID {
 type Renderable struct {
 	id                        RenderID
 	visible                   bool
-	x, y                      int
+	position                  image.Point
 	targetX, targetY, targetZ int
 }
 
@@ -67,13 +67,12 @@ func (t *Tissue) BuildTissue() {
 			prev:    curr,
 			next:    nil,
 			render: &Renderable{
-				id:      MakeRenderId("Matrix"),
-				visible: true,
-				x:       0,
-				y:       0,
-				targetX: 0,
-				targetY: 0,
-				targetZ: 0,
+				id:       MakeRenderId("Matrix"),
+				visible:  true,
+				position: image.Point{0, 0},
+				targetX:  0,
+				targetY:  0,
+				targetZ:  0,
 			},
 			attached:     make(map[RenderID]*Renderable),
 			cytokinesMap: make(map[image.Point]Cytokines),
@@ -92,13 +91,12 @@ func (t *Tissue) BuildTissue() {
 
 func (t *Tissue) MakeNewRenderAndAttach(idPrefix string) *Renderable {
 	render := &Renderable{
-		id:      MakeRenderId(idPrefix),
-		visible: true,
-		x:       0,
-		y:       0,
-		targetX: 0,
-		targetY: 0,
-		targetZ: 0,
+		id:       MakeRenderId(idPrefix),
+		visible:  true,
+		position: image.Point{0, 0},
+		targetX:  0,
+		targetY:  0,
+		targetZ:  0,
 	}
 	t.Attach(render)
 	return render
@@ -202,14 +200,15 @@ func (t *Tissue) Tick() {
 	}
 }
 
-func (t *Tissue) FindMatrix(r *Renderable) *ExtracellularMatrix {
-	m := t.rootMatrix
+func (t *Tissue) FindMatrix(r *Renderable) (m *ExtracellularMatrix) {
 	found := false
-	for m != nil && !found {
-		m.Lock()
+	for m = t.rootMatrix; m != nil && !found; {
+		m.RLock()
 		_, found = m.attached[r.id]
-		m.Unlock()
-		m = m.next
+		m.RUnlock()
+		if !found {
+			m = m.next
+		}
 	}
 	return m
 }
@@ -220,6 +219,22 @@ func (t *Tissue) Move(r *Renderable) {
 		return
 	}
 	m.Move(r)
+}
+
+func (t *Tissue) AddCytokine(r *Renderable, cType CytokineType, concentration uint8) uint8 {
+	m := t.FindMatrix(r)
+	if m == nil {
+		return 0
+	}
+	return m.AddCytokine(r.position, cType, concentration)
+}
+
+func (t *Tissue) ConsumeCytokines(r *Renderable, cType CytokineType, consumptionRate uint8) uint8 {
+	m := t.FindMatrix(r)
+	if m == nil {
+		return 0
+	}
+	return m.ConsumeCytokines(r.position, cType, consumptionRate)
 }
 
 type Walls struct {
@@ -274,21 +289,23 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	if m.walls.InBounds(x, y) {
-		concentration := 0
-		m.cytokineMu.RLock()
-		for _, cytokines := range m.cytokinesMap {
-			c, hasCytokine := cytokines[cell_damage]
-			if hasCytokine {
-				concentration += int(c.At(image.Point{x, y}))
+		pts := []image.Point{{x, y}}
+		cellDamageConcentration := m.GetCytokineContentrations(pts, cell_damage)[0]
+		chemotaxisConcentration := m.GetCytokineContentrations(pts, induce_chemotaxis)[0]
 
+		if chemotaxisConcentration > 0 && cellDamageConcentration > 0 {
+			// Randomly pick one or the other to show.
+			if rand.Intn(2) == 0 {
+				return color.RGBA{math.MaxUint8, math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8}
+			} else {
+				return color.RGBA{math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8, math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8}
 			}
 		}
-		m.cytokineMu.RUnlock()
-		if concentration > 0 {
-			if concentration > math.MaxUint8 {
-				concentration = math.MaxUint8
-			}
-			return color.RGBA{math.MaxUint8, math.MaxUint8 - uint8(concentration), math.MaxUint8 - uint8(concentration), math.MaxUint8}
+		if cellDamageConcentration > 0 {
+			return color.RGBA{math.MaxUint8, math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8}
+		}
+		if chemotaxisConcentration > 0 {
+			return color.RGBA{math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8, math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8}
 		}
 		return color.White
 	}
@@ -302,17 +319,17 @@ func (m *ExtracellularMatrix) RenderMetadata() string {
 
 func (m *ExtracellularMatrix) ConstrainBounds(r *Renderable) {
 	b := m.tissue.bounds
-	if r.x > b.Max.X {
-		r.x = b.Max.X
+	if r.position.X > b.Max.X {
+		r.position.X = b.Max.X
 	}
-	if r.x < b.Min.X {
-		r.x = b.Min.X
+	if r.position.X < b.Min.X {
+		r.position.X = b.Min.X
 	}
-	if r.y > b.Max.Y {
-		r.y = b.Max.Y
+	if r.position.Y > b.Max.Y {
+		r.position.Y = b.Max.Y
 	}
-	if r.y < b.Min.Y {
-		r.y = b.Min.Y
+	if r.position.Y < b.Min.Y {
+		r.position.Y = b.Min.Y
 	}
 }
 
@@ -340,16 +357,16 @@ func (m *ExtracellularMatrix) ConstrainTargetBounds(r *Renderable) {
 
 func (m *ExtracellularMatrix) Move(r *Renderable) {
 	m.ConstrainTargetBounds(r)
-	if r.targetX > r.x {
+	if r.targetX > r.position.X {
 		m.MoveX(r, 1)
 	}
-	if r.targetX < r.x {
+	if r.targetX < r.position.X {
 		m.MoveX(r, -1)
 	}
-	if r.targetY > r.y {
+	if r.targetY > r.position.Y {
 		m.MoveY(r, 1)
 	}
-	if r.targetY < r.y {
+	if r.targetY < r.position.Y {
 		m.MoveY(r, -1)
 	}
 	if r.targetZ > m.level {
@@ -361,12 +378,12 @@ func (m *ExtracellularMatrix) Move(r *Renderable) {
 }
 
 func (m *ExtracellularMatrix) MoveX(r *Renderable, x int) {
-	r.x += x
+	r.position.X += x
 	m.ConstrainBounds(r)
 }
 
 func (m *ExtracellularMatrix) MoveY(r *Renderable, y int) {
-	r.y += y
+	r.position.Y += y
 	m.ConstrainBounds(r)
 }
 
@@ -409,13 +426,35 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) RenderableData {
 	return RenderableData{
 		Id:      r.id,
 		Visible: r.visible,
-		X:       r.x,
-		Y:       r.y,
+		X:       r.position.X,
+		Y:       r.position.Y,
 		Z:       m.level,
 	}
 }
 
-func (m *ExtracellularMatrix) GetCytokines(pt image.Point) Cytokines {
+func (m *ExtracellularMatrix) GetCytokineContentrations(pts []image.Point, t CytokineType) (concentrations []uint8) {
+	m.cytokineMu.RLock()
+	defer m.cytokineMu.RUnlock()
+	for i := len(pts); i > 0; i-- {
+		concentrations = append(concentrations, 0)
+	}
+	for _, cytokines := range m.cytokinesMap {
+		c, hasCytokine := cytokines[t]
+		if hasCytokine {
+			for i, pt := range pts {
+				concentration := int(concentrations[i]) + int(c.At(pt))
+				if concentration > math.MaxUint8 {
+					concentrations[i] = math.MaxUint8
+				} else {
+					concentrations[i] = uint8(concentration)
+				}
+			}
+		}
+	}
+	return
+}
+
+func (m *ExtracellularMatrix) GetCytokinesAtPoint(pt image.Point) Cytokines {
 	m.cytokineMu.Lock()
 	defer m.cytokineMu.Unlock()
 	cytokines, hasPoint := m.cytokinesMap[pt]
@@ -426,42 +465,40 @@ func (m *ExtracellularMatrix) GetCytokines(pt image.Point) Cytokines {
 	return cytokines
 }
 
-func (m *ExtracellularMatrix) AddCytokine(r *Renderable, t CytokineType, concentration uint8) uint8 {
-	_, hasRender := m.attached[r.id]
-	if hasRender {
-		pt := image.Point{r.x, r.y}
-		cytokines := m.GetCytokines(pt)
-		m.cytokineMu.Lock()
-		c, hasCytokine := cytokines[t]
-		if !hasCytokine {
-			c = MakeCytokine(pt, t, concentration)
-			cytokines[t] = c
-		}
-		m.cytokineMu.Unlock()
-		return c.Add(concentration)
+func (m *ExtracellularMatrix) AddCytokine(pt image.Point, t CytokineType, concentration uint8) uint8 {
+	cytokines := m.GetCytokinesAtPoint(pt)
+	m.cytokineMu.Lock()
+	c, hasCytokine := cytokines[t]
+	if !hasCytokine {
+		c = MakeCytokine(pt, t, concentration)
+		cytokines[t] = c
 	}
-	if m.next != nil {
-		return m.next.AddCytokine(r, t, concentration)
-	}
-	return 0
+	m.cytokineMu.Unlock()
+	return c.Add(concentration)
 }
 
-func (m *ExtracellularMatrix) RemoveCytokine(r *Renderable, t CytokineType, concentration uint8) uint8 {
-	_, hasRender := m.attached[r.id]
-	if hasRender {
-		pt := image.Point{r.x, r.y}
-		m.cytokineMu.Lock()
-		cytokines := m.GetCytokines(pt)
+func (m *ExtracellularMatrix) GetCytokinesWithinRange(pt image.Point, t CytokineType) (cytokinesInRange []*Cytokine) {
+	m.cytokineMu.RLock()
+	defer m.cytokineMu.RUnlock()
+	for _, cytokines := range m.cytokinesMap {
 		c, hasCytokine := cytokines[t]
-		if !hasCytokine {
-			return 0
+		if hasCytokine && c.InBounds(pt) {
+			cytokinesInRange = append(cytokinesInRange, c)
 		}
-		return c.Sub(concentration)
 	}
-	if m.next != nil {
-		return m.next.RemoveCytokine(r, t, concentration)
+	return
+}
+
+func (m *ExtracellularMatrix) ConsumeCytokines(pt image.Point, t CytokineType, consumptionRate uint8) uint8 {
+	cytokines := m.GetCytokinesWithinRange(pt, t)
+	consumed := uint8(0)
+	for _, c := range cytokines {
+		consumed += c.Sub(consumptionRate)
+		if consumed == math.MaxUint8 {
+			return consumed
+		}
 	}
-	return 0
+	return consumed
 }
 
 func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *Walls {

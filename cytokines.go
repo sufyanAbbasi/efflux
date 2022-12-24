@@ -45,27 +45,32 @@ func MakeCytokine(pt image.Point, cytokine CytokineType, concentration uint8) *C
 	}
 }
 
-func (c *Cytokine) Add(x uint8) uint8 {
+func (c *Cytokine) Add(x uint8) (added uint8) {
 	c.Lock()
 	defer c.Unlock()
 	concentration := int(c.concentration) + int(x)
-	if concentration > math.MaxUint8-1 {
-		c.concentration = math.MaxUint8 - 1
+	if concentration >= math.MaxUint8 {
+		prev := c.concentration
+		c.concentration = math.MaxUint8
+		added = math.MaxUint8 - prev
 	} else {
 		c.concentration = uint8(concentration)
+		added = x
 	}
-	return c.concentration
+	return
 }
 
-func (c *Cytokine) Sub(x uint8) uint8 {
+func (c *Cytokine) Sub(x uint8) (removed uint8) {
 	c.Lock()
 	defer c.Unlock()
 	if x > c.concentration {
+		removed = c.concentration
 		c.concentration = 0
 	} else {
 		c.concentration -= x
+		removed = x
 	}
-	return c.concentration
+	return
 }
 
 func (c *Cytokine) Tick() {
