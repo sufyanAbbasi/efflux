@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/ring"
 	"context"
 	"fmt"
 	"image"
@@ -55,6 +56,36 @@ func (c CellType) String() string {
 		return "Dendritic"
 	}
 	return "unknown"
+}
+
+type CellActor interface {
+	Worker
+	AntigenPresenting
+	CellType() CellType
+	Start(context.Context)
+	SetStop(context.CancelFunc)
+	Stop()
+	Organ() *Node
+	Tissue() *Tissue
+	Position() image.Point
+	LastPositions() *ring.Ring
+	Function() *StateDiagram
+	WillMitosis() bool
+	Mitosis(ctx context.Context)
+	CollectResources(context.Context) bool
+	ProduceWaste()
+	Damage() int
+	Repair(int)
+	IncurDamage(int)
+	Apoptosis()
+	IsAerobic() bool
+	IsOxygenated() bool
+	Oxygenate(bool)
+	CanMove() bool
+	Move(dx, dy, dz int)
+	MoveToPoint(pt image.Point)
+	MoveTowardsCytokine(CytokineType) bool
+	MoveAwayFromCytokine(CytokineType) bool
 }
 
 type Cell struct {
@@ -335,6 +366,14 @@ func (c *Cell) ProduceWaste() {
 	}
 }
 
+func (c *Cell) Position() image.Point {
+	return c.render.position
+}
+
+func (c *Cell) LastPositions() *ring.Ring {
+	return c.render.lastPositions
+}
+
 func (c *Cell) CanMove() bool {
 	return false
 }
@@ -491,6 +530,9 @@ func (e *EukaryoticCell) IsAerobic() bool {
 }
 
 func CopyEukaryoticStemCell(base *EukaryoticCell) *EukaryoticCell {
+	position := image.Point{base.render.position.X, base.render.position.Y}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
 	return &EukaryoticCell{
 		Cell: &Cell{
 			cellType: base.cellType,
@@ -498,12 +540,13 @@ func CopyEukaryoticStemCell(base *EukaryoticCell) *EukaryoticCell {
 			mhc_i:    base.dna.MHC_I(),
 			workType: base.workType,
 			render: &Renderable{
-				id:       MakeRenderId(base.cellType.String()),
-				visible:  true,
-				position: image.Point{base.render.position.X, base.render.position.Y},
-				targetX:  base.render.targetX,
-				targetY:  base.render.targetY,
-				targetZ:  base.render.targetZ,
+				id:            MakeRenderId(base.cellType.String()),
+				visible:       true,
+				position:      position,
+				targetX:       base.render.targetX,
+				targetY:       base.render.targetY,
+				targetZ:       base.render.targetZ,
+				lastPositions: positionTracker,
 			},
 		},
 	}
@@ -524,18 +567,22 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 	default:
 		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
 	}
+	position := image.Point{base.render.position.X, base.render.position.Y}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
 	return &ProkaryoticCell{
 		Cell: &Cell{
 			cellType: base.cellType,
 			dna:      base.dna,
 			mhc_i:    base.dna.MHC_I(),
 			render: &Renderable{
-				id:       MakeRenderId(base.cellType.String()),
-				visible:  true,
-				position: image.Point{base.render.position.X, base.render.position.Y},
-				targetX:  base.render.targetX,
-				targetY:  base.render.targetY,
-				targetZ:  base.render.targetZ,
+				id:            MakeRenderId(base.cellType.String()),
+				visible:       true,
+				position:      position,
+				targetX:       base.render.targetX,
+				targetY:       base.render.targetY,
+				targetZ:       base.render.targetZ,
+				lastPositions: positionTracker,
 			},
 		},
 		generationTime:     generationTime,

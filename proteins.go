@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"math/rand"
 	"sync"
 	"time"
@@ -53,32 +54,6 @@ func (s *StateDiagram) Graft(mutation *StateDiagram) {
 	s.Unlock()
 }
 
-type CellActor interface {
-	Worker
-	AntigenPresenting
-	CellType() CellType
-	Start(context.Context)
-	SetStop(context.CancelFunc)
-	Stop()
-	Organ() *Node
-	Function() *StateDiagram
-	WillMitosis() bool
-	Mitosis(ctx context.Context)
-	CollectResources(context.Context) bool
-	ProduceWaste()
-	Damage() int
-	Repair(int)
-	IncurDamage(int)
-	Apoptosis()
-	IsAerobic() bool
-	IsOxygenated() bool
-	Oxygenate(bool)
-	CanMove() bool
-	Move(dx, dy, dz int)
-	MoveTowardsCytokine(CytokineType) bool
-	MoveAwayFromCytokine(CytokineType) bool
-}
-
 type StateNode struct {
 	next     *StateNode
 	function *ProteinFunction
@@ -111,8 +86,53 @@ func DoWork(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func MoveRandomly(ctx context.Context, cell CellActor) bool {
-	cell.Move(1-rand.Intn(3), 1-rand.Intn(3), 0)
+func Explore(ctx context.Context, cell CellActor) bool {
+	tissue := cell.Tissue()
+	if tissue == nil {
+		return true
+	}
+	p := cell.Position()
+	x := p.X
+	x_plus := x + 1
+	x_minus := x - 1
+	y := p.Y
+	y_plus := y + 1
+	y_minus := y - 1
+	points := []image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
+	isOpen := tissue.rootMatrix.GetOpenSpaces(points)
+	if len(isOpen) > 0 {
+		moveToPoint := isOpen[rand.Intn(len(isOpen))]
+		r := cell.LastPositions()
+		var newPositions []image.Point
+		// Find positions we haven't been to yet.
+		for _, pt := range isOpen {
+			found := false
+			for i := 0; i < r.Len() && r.Value != nil; i++ {
+				if pt == r.Value.(image.Point) {
+					found = true
+					break
+				}
+				r = r.Next()
+			}
+			if !found {
+				newPositions = append(newPositions, pt)
+			}
+		}
+		if len(newPositions) > 0 {
+			moveToPoint = newPositions[rand.Intn(len(newPositions))]
+			distanceFromCenter := ManhattanDistance(p, image.Point{0, 0})
+			if distanceFromCenter > MAIN_STAGE_RADIUS*2 {
+				// Choose a position that is hopefully towards the center to get unstuck.
+				if (ManhattanDistance(moveToPoint, image.Point{0, 0}) > distanceFromCenter) {
+					// Reroll.
+					moveToPoint = newPositions[rand.Intn(len(newPositions))]
+				}
+			}
+		}
+		cell.MoveToPoint(moveToPoint)
+	} else {
+		cell.Move(1-rand.Intn(3), 1-rand.Intn(3), 0)
+	}
 	return true
 }
 
@@ -489,7 +509,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 
 func MoveAwayFromChemotaxisCytokineOrRandomly(ctx context.Context, cell CellActor) bool {
 	if !cell.MoveAwayFromCytokine(induce_chemotaxis) {
-		return MoveRandomly(ctx, cell)
+		return Explore(ctx, cell)
 	}
 	return true
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"container/ring"
 	"context"
 	"fmt"
 	"image"
@@ -26,6 +27,7 @@ type Renderable struct {
 	visible                   bool
 	position                  image.Point
 	targetX, targetY, targetZ int
+	lastPositions             *ring.Ring
 }
 
 type RenderableData struct {
@@ -415,11 +417,17 @@ func (m *ExtracellularMatrix) Move(r *Renderable) {
 func (m *ExtracellularMatrix) MoveX(r *Renderable, x int) {
 	r.position.X += x
 	m.ConstrainBounds(r)
+	if r.lastPositions.Len() > 0 {
+		r.lastPositions = r.lastPositions.Next()
+	}
+	r.lastPositions.Value = r.position
 }
 
 func (m *ExtracellularMatrix) MoveY(r *Renderable, y int) {
 	r.position.Y += y
 	m.ConstrainBounds(r)
+	r.lastPositions.Value = r.position
+	r.lastPositions = r.lastPositions.Next()
 }
 
 func (m *ExtracellularMatrix) MoveUp(r *Renderable) {
@@ -490,6 +498,15 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) RenderableData {
 		Y:       r.position.Y,
 		Z:       m.level,
 	}
+}
+
+func (m *ExtracellularMatrix) GetOpenSpaces(pts []image.Point) (open []image.Point) {
+	for _, pt := range pts {
+		if m.walls.InBounds(pt) && pt.In(m.Bounds()) {
+			open = append(open, pt)
+		}
+	}
+	return
 }
 
 func (m *ExtracellularMatrix) GetCytokineContentrations(pts []image.Point, t CytokineType) (concentrations []uint8) {

@@ -184,3 +184,18 @@ func MakeRandRect(rect image.Rectangle) image.Rectangle {
 	y1 := RandInRange(rect.Min.Y, rect.Max.Y)
 	return image.Rect(x0, y0, x1, y1).Intersect(rect)
 }
+
+func ManhattanDistance(p0, p1 image.Point) int {
+	dx, dy := 0, 0
+	if p1.X > p0.X {
+		dx = p1.X - p0.X
+	} else {
+		dx = p0.X - p1.X
+	}
+	if p1.Y > p0.Y {
+		dy = p1.Y - p0.Y
+	} else {
+		dy = p0.Y - p1.Y
+	}
+	return dx + dy
+}
