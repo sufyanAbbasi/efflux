@@ -121,8 +121,14 @@ func Explore(ctx context.Context, cell CellActor) bool {
 		if len(newPositions) > 0 {
 			moveToPoint = newPositions[rand.Intn(len(newPositions))]
 			distanceFromCenter := ManhattanDistance(p, image.Point{0, 0})
-			if distanceFromCenter > MAIN_STAGE_RADIUS*2 {
-				// Choose a position that is hopefully towards the center to get unstuck.
+			if distanceFromCenter < MAIN_STAGE_RADIUS*2 {
+				// Choose a position that is hopefully away from the center.
+				if (ManhattanDistance(moveToPoint, image.Point{0, 0}) < distanceFromCenter) {
+					// Reroll.
+					moveToPoint = newPositions[rand.Intn(len(newPositions))]
+				}
+			} else if distanceFromCenter > MAIN_STAGE_RADIUS*3 {
+				// Choose a position that is hopefully towards the center.
 				if (ManhattanDistance(moveToPoint, image.Point{0, 0}) > distanceFromCenter) {
 					// Reroll.
 					moveToPoint = newPositions[rand.Intn(len(newPositions))]
