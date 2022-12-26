@@ -58,11 +58,12 @@ type CellActor interface {
 	AntigenPresenting
 	CellType() CellType
 	Start(context.Context)
+	SetStop(context.CancelFunc)
+	Stop()
 	Organ() *Node
 	Function() *StateDiagram
-	HasTelomerase() bool
 	WillMitosis() bool
-	Mitosis(ctx context.Context) CellActor
+	Mitosis(ctx context.Context)
 	CollectResources(context.Context) bool
 	ProduceWaste()
 	Damage() int
@@ -127,14 +128,6 @@ func MoveTowardsCellDamangeCytokine(ctx context.Context, cell CellActor) bool {
 
 func MoveTowardsAntigenPresentCytokine(ctx context.Context, cell CellActor) bool {
 	cell.MoveTowardsCytokine(antigen_present)
-	return true
-}
-
-func StemCellToSpecializedCell(ctx context.Context, cell CellActor) bool {
-	if cell.HasTelomerase() {
-		// Loses stem cell status after first mitosis, which is free.
-		cell.Mitosis(ctx)
-	}
 	return true
 }
 
@@ -275,7 +268,7 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	organ := cell.Organ()
 	resource := organ.materialPool.resourcePool.resources
 	ligand := organ.materialPool.GetLigand()
-	organ.materialPool.PutLigand(ligand)
+	defer organ.materialPool.PutLigand(ligand)
 	if resource.vitamins <= BRAIN_VITAMIN_THRESHOLD || resource.glucose <= BRAIN_GLUCOSE_THRESHOLD {
 		// If glocose or vitamin levels are low, produce hunger ligands.
 		ligand.hunger += 1
@@ -301,7 +294,7 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 	resource := organ.materialPool.resourcePool.resources
 	waste := organ.materialPool.wastePool.wastes
 	ligand := organ.materialPool.GetLigand()
-	organ.materialPool.PutLigand(ligand)
+	defer organ.materialPool.PutLigand(ligand)
 	if resource.o2 <= BRAIN_O2_THRESHOLD {
 		// If 02 levels are low, produce asphyxia ligands.
 		ligand.asphyxia += 1
@@ -317,6 +310,18 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 			workType: pump,
 		})
 		ligand.asphyxia--
+	}
+	return true
+}
+
+func CheckVitaminLevels(ctx context.Context, cell CellActor) bool {
+	// Add hunger ligand if vitamins are low.
+	resource := cell.Organ().materialPool.GetResource()
+	defer cell.Organ().materialPool.PutResource(resource)
+	if resource.vitamins < BRAIN_VITAMIN_THRESHOLD {
+		ligand := cell.Organ().materialPool.GetLigand()
+		defer cell.Organ().materialPool.PutLigand(ligand)
+		ligand.hunger += 1
 	}
 	return true
 }
@@ -346,19 +351,12 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
-				action:   StemCellToSpecializedCell,
+				action:   DoWork,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		},
 	}
 	currNode := s.root
-	currNode.next = &StateNode{
-		function: &ProteinFunction{
-			action:   DoWork,
-			proteins: GenerateRandomProteinPermutation(c),
-		},
-	}
-	currNode = currNode.next
 	switch c.CellType() {
 	case RedBlood:
 		currNode.next = &StateNode{
@@ -421,6 +419,13 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 				},
 			}
 		}
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   CheckVitaminLevels,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
 	case Pneumocyte:
 		fallthrough
 	case Keratinocyte:
@@ -471,7 +476,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	}
 	currNode = currNode.next
 	currNode.next = &StateNode{
-		next: s.root.next, // Do Work
+		next: s.root, // Do Work
 		function: &ProteinFunction{
 			action:   ShouldApoptosis,
 			proteins: GenerateRandomProteinPermutation(c),
@@ -497,12 +502,25 @@ func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	// - Enough time has passed
 	resource := cell.Organ().materialPool.GetResource()
 	defer cell.Organ().materialPool.PutResource(resource)
-	if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.WillMitosis() {
-		resource.glucose -= GLUCOSE_COST_MITOSIS
-		cell.Mitosis(ctx)
-	} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.WillMitosis() {
-		resource.vitamins -= VITAMIN_COST_MITOSIS
-		cell.Mitosis(ctx)
+	switch cell.CellType() {
+	case Bacteroidota:
+		// Grow via HUNGER ligand.
+		ligand := cell.Organ().materialPool.GetLigand()
+		defer cell.Organ().materialPool.PutLigand(ligand)
+		if ligand.hunger < LIGAND_HUNGER_THRESHOLD {
+			break
+		} else {
+			ligand.hunger -= LIGAND_HUNGER_THRESHOLD
+		}
+		fallthrough
+	default:
+		if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.WillMitosis() {
+			resource.glucose -= GLUCOSE_COST_MITOSIS
+			cell.Mitosis(ctx)
+		} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.WillMitosis() {
+			resource.vitamins -= VITAMIN_COST_MITOSIS
+			cell.Mitosis(ctx)
+		}
 	}
 	return true
 }

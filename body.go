@@ -1,11 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"log"
-	"net/http"
 )
 
 type Graph struct {
@@ -24,49 +20,6 @@ type Body struct {
 	muscleNodes []*Node
 	skinNodes   []*Node
 	kidneyNodes []*Node
-}
-
-func MakeTransportRequest(
-	transportUrl string,
-	name string,
-	dna *DNA,
-	cellType CellType,
-	workType WorkType,
-) {
-	dnaBase, err := dna.Serialize()
-	if err != nil {
-		log.Fatal("Transport: ", err)
-	}
-	dnaType := 0
-	for i, d := range DNATypeMap {
-		if d == dna.dnaType {
-			dnaType = i
-		}
-	}
-	jsonData, err := json.Marshal(TransportRequest{
-		Name:     name,
-		Base:     dnaBase,
-		DNAType:  dnaType,
-		CellType: cellType,
-		WorkType: workType,
-	})
-	if err != nil {
-		log.Fatal("Transport: ", err)
-	}
-	request, err := http.NewRequest("POST", transportUrl, bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Fatal("Transport: ", err)
-	}
-	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		log.Fatal("Transport: ", err)
-	}
-	defer response.Body.Close()
-	// body, _ := ioutil.ReadAll(response.Body)
-	// fmt.Println("Body:", string(body))
 }
 
 func (b *Body) GenerateCellsAndStart(ctx context.Context) {
@@ -118,7 +71,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i])
+				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "")
 			}
 		}
 	}
@@ -139,7 +92,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			cellType := cellTypes[i]
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], 0)
+				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], 0, "")
 			}
 		}
 	}

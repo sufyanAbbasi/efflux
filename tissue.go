@@ -194,6 +194,17 @@ func (t *Tissue) FindMatrix(r *Renderable) (m *ExtracellularMatrix) {
 	return m
 }
 
+func (t *Tissue) FindRender(renderId RenderID) (r *Renderable) {
+	render := &Renderable{id: renderId}
+	m := t.FindMatrix(render)
+	if m != nil {
+		m.RLock()
+		r = m.attached[renderId]
+		m.RUnlock()
+	}
+	return
+}
+
 func (t *Tissue) Move(r *Renderable) {
 	m := t.FindMatrix(r)
 	if m == nil {

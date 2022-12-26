@@ -70,10 +70,23 @@ type Cell struct {
 	function     *StateDiagram
 	oxygenated   bool
 	render       *Renderable
+	stop         context.CancelFunc
 }
 
 func (c *Cell) String() string {
 	return fmt.Sprintf("%v (%v)", c.cellType, c.dna.name)
+}
+
+func (c *Cell) SetStop(stop context.CancelFunc) {
+	c.stop = stop
+}
+
+func (c *Cell) Stop() {
+	c.stop()
+}
+
+func (c *Cell) CanTransport() bool {
+	return false
 }
 
 func (c *Cell) Organ() *Node {
@@ -122,6 +135,7 @@ func (c *Cell) Oxygenate(oxygenate bool) {
 func (c *Cell) Damage() int {
 	return c.damage
 }
+
 func (c *Cell) Repair(damage int) {
 	if c.damage <= damage {
 		c.damage = 0
@@ -136,9 +150,10 @@ func (c *Cell) IncurDamage(damage int) {
 	fmt.Println("Damaged:", c, "in", c.organ)
 }
 
-func (c *Cell) Apoptosis() {
+func (c *Cell) CleanUp() {
 	c.render.visible = false
 	c.organ.tissue.Detach(c.render)
+	c.Stop()
 	c.organ = nil
 }
 
@@ -234,9 +249,6 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 	for !reflect.DeepEqual(c.resourceNeed, new(ResourceBlob)) {
 		select {
 		case <-ctx.Done():
-			if c.cellType != RedBlood {
-				fmt.Println(c, "Timeout")
-			}
 			return false
 		default:
 			resource := c.organ.materialPool.GetResource()
@@ -410,14 +422,17 @@ func (c *Cell) DropCytokine(t CytokineType, concentration uint8) uint8 {
 
 type EukaryoticCell struct {
 	*Cell
-	telomereLength int
-	hasTelomerase  bool
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
 	e.function = e.dna.makeFunction(e)
 	go e.function.Run(ctx, e)
 	e.Tissue().Attach(e.render)
+}
+
+func (e *EukaryoticCell) SetOrgan(node *Node) {
+	e.Cell.SetOrgan(node)
+	e.organ.AddWorker(e)
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -427,26 +442,12 @@ func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
 	return e.function.current.function.proteins
 }
 
-func (e *EukaryoticCell) HasTelomerase() bool {
-	return e.hasTelomerase
-}
+func (e *EukaryoticCell) Mitosis(ctx context.Context) {
+	if e.organ == nil {
+		return
+	}
+	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id))
 
-func (e *EukaryoticCell) Mitosis(ctx context.Context) CellActor {
-	if e.telomereLength <= 0 {
-		return nil
-	}
-	e.hasTelomerase = false
-	e.telomereLength--
-	cell := CopyEukaryoticStemCell(e)
-	cell.organ = e.organ
-	cell.telomereLength = e.telomereLength
-	cell.hasTelomerase = false
-	if e.organ != nil {
-		e.organ.AddWorker(cell)
-	}
-	fmt.Println("Spawned:", cell, "in", cell.organ)
-	defer cell.Start(ctx)
-	return CellActor(cell)
 }
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
@@ -454,12 +455,16 @@ func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.DropCytokine(cell_damage, CYTOKINE_CELL_DAMAGE)
 }
 
-func (e *EukaryoticCell) Apoptosis() {
-	e.Cell.Apoptosis()
+func (e *EukaryoticCell) CleanUp() {
+	e.Cell.CleanUp()
 	if e.organ != nil {
 		e.organ.RemoveWorker(e)
 	}
 	// TODO: make sure this gets garbage collected.
+}
+
+func (e *EukaryoticCell) Apoptosis() {
+	e.CleanUp()
 }
 
 func (e *EukaryoticCell) WillMitosis() bool {
@@ -501,8 +506,6 @@ func CopyEukaryoticStemCell(base *EukaryoticCell) *EukaryoticCell {
 				targetZ:  base.render.targetZ,
 			},
 		},
-		telomereLength: TELOMERE_LENGTH,
-		hasTelomerase:  true,
 	}
 }
 
@@ -546,8 +549,12 @@ func (p *ProkaryoticCell) Start(ctx context.Context) {
 	p.Tissue().Attach(p.render)
 }
 
-func (p *ProkaryoticCell) HasTelomerase() bool {
-	return false
+func (p *ProkaryoticCell) CanTransport() bool {
+	return true
+}
+
+func (p *ProkaryoticCell) Apoptosis() {
+	p.CleanUp()
 }
 
 func (p *ProkaryoticCell) WillMitosis() bool {
@@ -558,13 +565,12 @@ func (p *ProkaryoticCell) WillMitosis() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) Mitosis(ctx context.Context) CellActor {
+func (p *ProkaryoticCell) Mitosis(ctx context.Context) {
 	p.lastGenerationTime = time.Now()
-	cell := CopyProkaryoticCell(p)
-	cell.organ = p.organ
-	fmt.Println("Spawned:", cell, "in", cell.organ)
-	defer cell.Start(ctx)
-	return CellActor(cell)
+	if p.organ == nil {
+		return
+	}
+	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, 0, string(p.render.id))
 }
 
 func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {
@@ -618,6 +624,10 @@ type AntigenPresenting interface {
 	PresentAntigen(reset bool) *Antigen
 	SetDNA(*DNA)
 	DNA() *DNA
+}
+
+func (i *Leukocyte) CanTransport() bool {
+	return true
 }
 
 func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
@@ -693,52 +703,4 @@ func MakeDendriticCell(dna *DNA) *DendriticCell {
 		},
 		proteinSignatures: make(map[Protein]bool),
 	}
-}
-
-func MakeCellFromRequest(request TransportRequest) (CellActor, error) {
-	dna, err := MakeDNAFromRequest(request)
-	if err != nil {
-		return nil, err
-	}
-	var cell CellActor
-	switch request.CellType {
-	case Bacterial:
-		fallthrough
-	case Bacteroidota:
-		cell = CopyProkaryoticCell(&ProkaryoticCell{
-			Cell: &Cell{
-				cellType: request.CellType,
-				dna:      dna,
-				render:   &Renderable{},
-			},
-		})
-	case RedBlood:
-		fallthrough
-	case Neuron:
-		fallthrough
-	case Cardiomyocyte:
-		fallthrough
-	case Pneumocyte:
-		fallthrough
-	case Myocyte:
-		fallthrough
-	case Keratinocyte:
-		fallthrough
-	case Enterocyte:
-		fallthrough
-	case TLymphocyte:
-		fallthrough
-	case Dendritic:
-		fallthrough
-	default:
-		cell = CopyEukaryoticStemCell(&EukaryoticCell{
-			Cell: &Cell{
-				cellType: request.CellType,
-				dna:      dna,
-				workType: request.WorkType,
-				render:   &Renderable{},
-			},
-		})
-	}
-	return cell, nil
 }

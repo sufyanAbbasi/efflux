@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -105,16 +106,61 @@ type MaterialStatusData struct {
 }
 
 type TransportRequest struct {
-	Name     string
-	Base     []byte
-	DNAType  int // Curve number, like elliptic.P384()
-	CellType CellType
-	WorkType WorkType
+	Name           string
+	Base           []byte
+	DNAType        int // Curve number, like elliptic.P384()
+	CellType       CellType
+	WorkType       WorkType
+	ParentRenderID string
 }
 
 type Edge struct {
 	workConnection *Connection
 	transportUrl   string
+}
+
+func MakeTransportRequest(
+	transportUrl string,
+	name string,
+	dna *DNA,
+	cellType CellType,
+	workType WorkType,
+	parentRenderID string,
+) error {
+	dnaBase, err := dna.Serialize()
+	if err != nil {
+		log.Fatal("Transport: ", err)
+	}
+	dnaType := 0
+	for i, d := range DNATypeMap {
+		if d == dna.dnaType {
+			dnaType = i
+		}
+	}
+	jsonData, err := json.Marshal(TransportRequest{
+		Name:           name,
+		Base:           dnaBase,
+		DNAType:        dnaType,
+		CellType:       cellType,
+		WorkType:       workType,
+		ParentRenderID: parentRenderID,
+	})
+	if err != nil {
+		return fmt.Errorf("transport error: %v", err)
+	}
+	request, err := http.NewRequest("POST", transportUrl, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("transport error: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("transport error: %v", err)
+	}
+	defer response.Body.Close()
+	return nil
 }
 
 func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
@@ -130,17 +176,77 @@ func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cell, err := MakeCellFromRequest(request)
+	cell, err := n.MakeCellFromRequest(request)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	cell.SetOrgan(n)
-	fmt.Println("Initialized:", cell, "in", cell.Organ())
-	cell.Start(context.Background())
+	fmt.Println("Spawned:", cell, "in", cell.Organ())
+	ctx, stop := context.WithCancel(context.Background())
+	cell.SetStop(stop)
+	cell.Start(ctx)
 
 	fmt.Fprintf(w, "Success: Created %s", cell)
+}
+
+func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) {
+	dna, err := MakeDNAFromRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	var render *Renderable
+	if request.ParentRenderID != "" {
+		renderId := RenderID(request.ParentRenderID)
+		if n.tissue != nil {
+			render = n.tissue.FindRender(renderId)
+		}
+	}
+	if render == nil {
+		render = &Renderable{}
+	}
+	var cell CellActor
+	switch request.CellType {
+	case Bacterial:
+		fallthrough
+	case Bacteroidota:
+		cell = CopyProkaryoticCell(&ProkaryoticCell{
+			Cell: &Cell{
+				cellType: request.CellType,
+				dna:      dna,
+				render:   render,
+			},
+		})
+	case RedBlood:
+		fallthrough
+	case Neuron:
+		fallthrough
+	case Cardiomyocyte:
+		fallthrough
+	case Pneumocyte:
+		fallthrough
+	case Myocyte:
+		fallthrough
+	case Keratinocyte:
+		fallthrough
+	case Enterocyte:
+		fallthrough
+	case TLymphocyte:
+		fallthrough
+	case Dendritic:
+		fallthrough
+	default:
+		cell = CopyEukaryoticStemCell(&EukaryoticCell{
+			Cell: &Cell{
+				cellType: request.CellType,
+				dna:      dna,
+				workType: request.WorkType,
+				render:   render,
+			},
+		})
+	}
+	return cell, nil
 }
 
 func SendWork(connection *Connection, request Work) {
@@ -354,7 +460,6 @@ func (n *Node) AddWorker(worker Worker) {
 		}
 		n.managers[worker.WorkType()] = manager
 	}
-	worker.SetOrgan(n)
 }
 
 func (n *Node) RemoveWorker(worker Worker) {
