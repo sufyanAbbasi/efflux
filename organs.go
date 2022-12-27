@@ -74,6 +74,7 @@ type WorkSocketData struct {
 type DiffusionSocketData struct {
 	Resources ResourceBlobData
 	Waste     WasteBlobData
+	Hormone   HormoneBlobData
 }
 
 type StatusSocketData struct {
@@ -103,6 +104,7 @@ type MaterialStatusData struct {
 	Hunger       int `json:"hunger"`
 	Asphyxia     int `json:"asphyxia"`
 	Inflammation int `json:"inflammation"`
+	CSF          int `json:"csf"`
 }
 
 type TransportRequest struct {
@@ -114,7 +116,18 @@ type TransportRequest struct {
 	ParentRenderID string
 }
 
+type EdgeType int
+
+const (
+	cardiovascular EdgeType = iota
+	neuronal
+	lymphatic
+	muscular
+	skeletal
+)
+
 type Edge struct {
+	edgeType       EdgeType
 	workConnection *Connection
 	transportUrl   string
 }
@@ -409,7 +422,7 @@ func (n *Node) Start(ctx context.Context) {
 	}()
 }
 
-func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string) error {
+func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string, edgeType EdgeType) error {
 	dialer := websocket.Dialer{}
 	connection, response, err := dialer.DialContext(ctx, websocketUrl, http.Header{})
 	if err != nil || response.StatusCode != 101 {
@@ -421,6 +434,7 @@ func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transpo
 		Conn: connection,
 	}
 	n.edges = append(n.edges, &Edge{
+		edgeType:       edgeType,
 		workConnection: conn,
 		transportUrl:   transportUrl,
 	})
@@ -428,9 +442,9 @@ func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transpo
 	return nil
 }
 
-func ConnectNodes(ctx context.Context, node1, node2 *Node) {
-	node1.Connect(ctx, node2.origin, node2.websocketUrl, node2.transportUrl)
-	node2.Connect(ctx, node1.origin, node1.websocketUrl, node1.transportUrl)
+func ConnectNodes(ctx context.Context, node1, node2 *Node, toNode2 EdgeType, toNode1 EdgeType) {
+	node1.Connect(ctx, node2.origin, node2.websocketUrl, node2.transportUrl, toNode2)
+	node2.Connect(ctx, node1.origin, node1.websocketUrl, node1.transportUrl, toNode1)
 }
 
 func (n *Node) MakeAvailable(worker Worker) {
@@ -541,6 +555,11 @@ func (n *Node) ReceiveDiffusion(request Work) {
 		co2:        data.Waste.CO2,
 		creatinine: data.Waste.Creatinine,
 	})
+	hormone := n.materialPool.GetHormone()
+	defer n.materialPool.PutHormone(hormone)
+	hormone.Add(&HormoneBlob{
+		colony_stimulating_factor: data.Hormone.ColonyStimulatingFactor,
+	})
 }
 
 func (n *Node) GetNodeStatus(connection *Connection) {
@@ -584,6 +603,7 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				Hunger:       n.materialPool.ligandPool.ligands.hunger,
 				Asphyxia:     n.materialPool.ligandPool.ligands.asphyxia,
 				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
+				CSF:          n.materialPool.hormonePool.hormones.colony_stimulating_factor,
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
@@ -657,12 +677,25 @@ func (n *Node) SendDiffusion() {
 		if len(n.edges) == 0 {
 			return
 		}
-		// Pick a random edge to diffuse to.
-		edge := n.edges[rand.Intn(len(n.edges))]
+		// Pick a random, valid edge to diffuse to.
+		var diffusionEdges []*Edge
+		for _, e := range n.edges {
+			switch e.edgeType {
+			case neuronal:
+				// Pass
+			default:
+				diffusionEdges = append(diffusionEdges, e)
+			}
+		}
+		if len(diffusionEdges) == 0 {
+			return
+		}
+		edge := diffusionEdges[rand.Intn(len(diffusionEdges))]
 
-		// Grab a resource and waste blob to diffuse. Can be empty.
+		// Grab a resource, waste, and hormone blob to diffuse. Can be empty.
 		resource := n.materialPool.SplitResource()
 		waste := n.materialPool.SplitWaste()
+		hormone := n.materialPool.SplitHormone()
 		diffusionData, err := json.Marshal(DiffusionSocketData{
 			Resources: ResourceBlobData{
 				O2:       resource.o2,
@@ -672,6 +705,9 @@ func (n *Node) SendDiffusion() {
 			Waste: WasteBlobData{
 				CO2:        waste.co2,
 				Creatinine: waste.creatinine,
+			},
+			Hormone: HormoneBlobData{
+				ColonyStimulatingFactor: hormone.colony_stimulating_factor,
 			},
 		})
 		if err != nil {
@@ -697,14 +733,14 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *Con
 			if ok {
 				if work.status == 0 {
 					// Received incompleted work, which is not expected.
-					log.Fatal(fmt.Sprintf("Should not receive incompleted work, got %v", work))
+					log.Fatalf("Should not receive incompleted work, got %v", work)
 				} else {
 					// Received completed work.
 					manager.resultChan <- work
 				}
 			} else {
 				// Received completed work, but not expected.
-				log.Fatal(fmt.Sprintf("Received completed work, but unable to process it. Got %v", work))
+				log.Fatalf("Received completed work, but unable to process it. Got %v", work)
 			}
 		}
 	}

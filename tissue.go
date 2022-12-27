@@ -53,7 +53,7 @@ func InitializeTissue(ctx context.Context) *Tissue {
 	tissue := &Tissue{
 		ctx:           ctx,
 		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
-		streamingChan: make(chan chan RenderableData),
+		streamingChan: make(chan chan RenderableData, STREAMING_BUFFER_SIZE),
 	}
 	tissue.BuildTissue()
 	return tissue
@@ -76,8 +76,9 @@ func (t *Tissue) BuildTissue() {
 				targetY:  0,
 				targetZ:  0,
 			},
-			attached:     make(map[RenderID]*Renderable),
-			cytokinesMap: make(map[image.Point]Cytokines),
+			attached:         make(map[RenderID]*Renderable),
+			cytokinesMap:     make(map[image.Point]Cytokines),
+			interactionsChan: make(map[image.Point]chan CellActor),
 		}
 		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
 		if curr.prev != nil {
@@ -131,7 +132,7 @@ func (t *Tissue) Stream(connection *Connection) {
 			return
 		default:
 			t.StreamMatrices(connection)
-			r := make(chan RenderableData)
+			r := make(chan RenderableData, RENDER_BUFFER_SIZE)
 			t.streamingChan <- r
 			for renderable := range r {
 				err := connection.WriteJSON(renderable)
@@ -231,6 +232,80 @@ func (t *Tissue) ConsumeCytokines(r *Renderable, cType CytokineType, consumption
 	return m.ConsumeCytokines(r.position, cType, consumptionRate)
 }
 
+func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Renderable) {
+	m := t.FindMatrix(r)
+	if m == nil {
+		return
+	}
+	m.interactionsMu.Lock()
+	interactionChan, found := m.interactionsChan[r.position]
+	if !found {
+		interactionChan = make(chan CellActor, INTERACTIONS_BUFFER_SIZE)
+		m.interactionsChan[r.position] = interactionChan
+	}
+	m.interactionsMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, BROADCAST_INTERACTION_TIMEOUT_SEC)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case interactionChan <- cell:
+		}
+	}
+}
+
+func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactions []CellActor) {
+	m := t.FindMatrix(r)
+	if m == nil {
+		return
+	}
+	x := r.position.X
+	x_plus := x + 1
+	x_minus := x - 1
+	y := r.position.Y
+	y_plus := y + 1
+	y_minus := y - 1
+	points := [9]image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
+	var interactionChans [9]chan CellActor
+	for i, pt := range points {
+		m.interactionsMu.Lock()
+		interactionChan, found := m.interactionsChan[pt]
+		if !found {
+			interactionChan = make(chan CellActor, INTERACTIONS_BUFFER_SIZE)
+			m.interactionsChan[pt] = interactionChan
+		}
+		m.interactionsMu.Unlock()
+		interactionChans[i] = interactionChan
+	}
+	ctx, cancel := context.WithTimeout(ctx, INTERACTION_TIMEOUT_SEC)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cell := <-interactionChans[0]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[1]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[2]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[3]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[4]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[5]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[6]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[7]:
+			interactions = append(interactions, cell)
+		case cell := <-interactionChans[8]:
+			interactions = append(interactions, cell)
+		}
+	}
+}
+
 type Walls struct {
 	sync.RWMutex
 	mainStage     Circle
@@ -274,23 +349,25 @@ func (w *Walls) InBounds(pt image.Point) bool {
 			}
 		}
 	}
-	w.RLock()
+	w.Lock()
 	w.inBoundsCache[pt] = inBounds
-	w.RUnlock()
+	w.Unlock()
 	return inBounds
 }
 
 type ExtracellularMatrix struct {
 	sync.RWMutex
-	tissue       *Tissue
-	level        int
-	next         *ExtracellularMatrix
-	prev         *ExtracellularMatrix
-	walls        *Walls
-	cytokinesMap map[image.Point]Cytokines
-	cytokineMu   sync.RWMutex
-	render       *Renderable
-	attached     map[RenderID]*Renderable
+	tissue           *Tissue
+	level            int
+	next             *ExtracellularMatrix
+	prev             *ExtracellularMatrix
+	walls            *Walls
+	attached         map[RenderID]*Renderable
+	render           *Renderable
+	cytokinesMap     map[image.Point]Cytokines
+	cytokineMu       sync.RWMutex
+	interactionsChan map[image.Point]chan CellActor
+	interactionsMu   sync.RWMutex
 }
 
 func (m *ExtracellularMatrix) ColorModel() color.Model {

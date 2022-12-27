@@ -24,6 +24,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 	if s.root != nil {
 		s.current = s.root
 		for {
+			cell.BroadcastPosition(ctx)
 			select {
 			case <-ctx.Done():
 				return
@@ -302,7 +303,6 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 		ligand.hunger -= 1
 	}
 	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
-		fmt.Println("HUNGRY")
 		cell.Organ().RequestWork(Work{
 			workType: move,
 		})
@@ -331,7 +331,6 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 		ligand.asphyxia -= 1
 	}
 	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
-		fmt.Println("ASPHYXIA")
 		cell.Organ().RequestWork(Work{
 			workType: pump,
 		})
@@ -357,6 +356,19 @@ func Flatulate(ctx context.Context, cell CellActor) bool {
 	waste := cell.Organ().materialPool.GetWaste()
 	defer cell.Organ().materialPool.PutWaste(waste)
 	waste.co2 = 0
+	return true
+}
+
+func Interact(ctx context.Context, cell CellActor) bool {
+	interactions := cell.GetInteractions(ctx)
+	for _, interaction := range interactions {
+		if cell != interaction {
+			fmt.Printf("%v interacted with %v\n", cell, interaction)
+		}
+	}
+	if len(interactions) > 0 {
+		fmt.Println()
+	}
 	return true
 }
 
@@ -489,6 +501,15 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   MoveTowardsChemotaxisCytokine,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
+	if c.CanInteract() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   Interact,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}

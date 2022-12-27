@@ -24,6 +24,10 @@ const (
 	Keratinocyte  // Skin Cell
 	Enterocyte    // Gut Lining Cell
 	Podocyte      // Kidney Cell
+	Hemocytoblast // Bone Marrow Stem Cell, spawns Lymphoblast and Myeloblast
+	Lymphoblast   // Stem Cell, becomes NK, B cells, T cells (and Dendritic cells but not really)
+	Myeloblast    // Stem Cell, becomes Neutrophil, Macrophages, and Dendritic cells
+	Macrophage    // Macrophage
 	TLymphocyte   // T Cell
 	Dendritic     // Dendritic Cells
 )
@@ -50,6 +54,14 @@ func (c CellType) String() string {
 		return "Enterocyte"
 	case Podocyte:
 		return "Podocyte"
+	case Hemocytoblast:
+		return "Hemocytoblast"
+	case Lymphoblast:
+		return "Lymphoblast"
+	case Myeloblast:
+		return "Myeloblast"
+	case Macrophage:
+		return "Macrophage"
 	case TLymphocyte:
 		return "TLymphocyte"
 	case Dendritic:
@@ -69,6 +81,7 @@ type CellActor interface {
 	Tissue() *Tissue
 	Position() image.Point
 	LastPositions() *ring.Ring
+	BroadcastPosition(ctx context.Context)
 	Function() *StateDiagram
 	WillMitosis() bool
 	Mitosis(ctx context.Context)
@@ -86,6 +99,8 @@ type CellActor interface {
 	MoveToPoint(pt image.Point)
 	MoveTowardsCytokine(CytokineType) bool
 	MoveAwayFromCytokine(CytokineType) bool
+	CanInteract() bool
+	GetInteractions(ctx context.Context) (interactions []CellActor)
 }
 
 type Cell struct {
@@ -459,6 +474,19 @@ func (c *Cell) DropCytokine(t CytokineType, concentration uint8) uint8 {
 	return 0
 }
 
+func (c *Cell) CanInteract() bool {
+	return false
+}
+
+func (c *Cell) GetInteractions(ctx context.Context) (interactions []CellActor) {
+	tissue := c.Tissue()
+	if tissue == nil {
+		return
+	}
+	interactions = tissue.GetInteractions(ctx, c.render)
+	return
+}
+
 type EukaryoticCell struct {
 	*Cell
 }
@@ -472,6 +500,10 @@ func (e *EukaryoticCell) Start(ctx context.Context) {
 func (e *EukaryoticCell) SetOrgan(node *Node) {
 	e.Cell.SetOrgan(node)
 	e.organ.AddWorker(e)
+}
+
+func (e *EukaryoticCell) BroadcastPosition(ctx context.Context) {
+	e.Tissue().BroadcastPosition(ctx, e, e.render)
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -552,6 +584,132 @@ func CopyEukaryoticStemCell(base *EukaryoticCell) *EukaryoticCell {
 	}
 }
 
+type Leukocyte struct {
+	*Cell
+}
+
+type AntigenPresenting interface {
+	PresentAntigen(reset bool) *Antigen
+	SetDNA(*DNA)
+	DNA() *DNA
+}
+
+func (i *Leukocyte) CanTransport() bool {
+	return true
+}
+
+func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
+	if c.PresentAntigen(false) == nil ||
+		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
+		fmt.Println("KILL:", c)
+		return false
+	} else {
+		fmt.Println("Passes:", c)
+		return true
+	}
+}
+
+func (i *Leukocyte) CanMove() bool {
+	return true
+}
+
+func (i *Leukocyte) CanInteract() bool {
+	return true
+}
+
+type LeukocyteStemCell struct {
+	*Leukocyte
+}
+
+type Neutrophil struct {
+	*Leukocyte
+}
+
+func CopyNeutrophil(base *Neutrophil) *Neutrophil {
+	position := image.Point{base.render.position.X, base.render.position.Y}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
+	return &Neutrophil{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: base.cellType,
+				dna:      base.dna,
+				mhc_i:    base.dna.MHC_I(),
+				workType: base.workType,
+				render: &Renderable{
+					id:            MakeRenderId(base.cellType.String()),
+					visible:       true,
+					position:      position,
+					targetX:       base.render.targetX,
+					targetY:       base.render.targetY,
+					targetZ:       base.render.targetZ,
+					lastPositions: positionTracker,
+				},
+			},
+		},
+	}
+}
+
+type TCell struct {
+	*Leukocyte
+	proteinReceptor Protein
+}
+
+func MakeTCell(dna *DNA, proteinReceptor Protein) *TCell {
+	return &TCell{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: TLymphocyte,
+				dna:      dna,
+				mhc_i:    dna.MHC_I(),
+			},
+		},
+		proteinReceptor: proteinReceptor,
+	}
+}
+
+func GenerateTCells(dna *DNA) (tCells []*TCell) {
+	for i := 0; i < 65535; i++ {
+		_, isSelf := dna.selfProteins[Protein(i)]
+		if !isSelf {
+			tCells = append(tCells, MakeTCell(dna, Protein(i)))
+		}
+	}
+	return
+}
+
+type DendriticCell struct {
+	Leukocyte
+	proteinSignatures map[Protein]bool
+}
+
+func (d *DendriticCell) Collect(t AntigenPresenting) {
+	for _, p := range t.PresentAntigen(false).proteins {
+		d.proteinSignatures[p] = false
+	}
+}
+
+func (d *DendriticCell) FoundMatch(t *TCell) bool {
+	_, found := d.proteinSignatures[t.proteinReceptor]
+	if found {
+		d.proteinSignatures[t.proteinReceptor] = found
+	}
+	return found
+}
+
+func MakeDendriticCell(dna *DNA) *DendriticCell {
+	return &DendriticCell{
+		Leukocyte: Leukocyte{
+			Cell: &Cell{
+				cellType: Dendritic,
+				dna:      dna,
+				mhc_i:    dna.MHC_I(),
+			},
+		},
+		proteinSignatures: make(map[Protein]bool),
+	}
+}
+
 type ProkaryoticCell struct {
 	*Cell
 	generationTime     time.Duration
@@ -602,6 +760,10 @@ func (p *ProkaryoticCell) CanTransport() bool {
 
 func (p *ProkaryoticCell) Apoptosis() {
 	p.CleanUp()
+}
+
+func (p *ProkaryoticCell) BroadcastPosition(ctx context.Context) {
+	p.Tissue().BroadcastPosition(ctx, p, p.render)
 }
 
 func (p *ProkaryoticCell) WillMitosis() bool {
@@ -660,94 +822,5 @@ func (v *Virus) InfectCell(c CellActor) {
 		if function != nil {
 			function.Graft(v.dna.makeFunction(c))
 		}
-	}
-}
-
-type Leukocyte struct {
-	Cell
-}
-
-type AntigenPresenting interface {
-	PresentAntigen(reset bool) *Antigen
-	SetDNA(*DNA)
-	DNA() *DNA
-}
-
-func (i *Leukocyte) CanTransport() bool {
-	return true
-}
-
-func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
-	if c.PresentAntigen(false) == nil ||
-		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
-		fmt.Println("KILL:", c)
-		return false
-	} else {
-		fmt.Println("Passes:", c)
-		return true
-	}
-}
-
-func (i *Leukocyte) CanMove() bool {
-	return true
-}
-
-type TCell struct {
-	Leukocyte
-	proteinReceptor Protein
-}
-
-func MakeTCell(dna *DNA, proteinReceptor Protein) *TCell {
-	return &TCell{
-		Leukocyte: Leukocyte{
-			Cell: Cell{
-				cellType: TLymphocyte,
-				dna:      dna,
-				mhc_i:    dna.MHC_I(),
-			},
-		},
-		proteinReceptor: proteinReceptor,
-	}
-}
-
-func GenerateTCells(dna *DNA) (tCells []*TCell) {
-	for i := 0; i < 65535; i++ {
-		_, isSelf := dna.selfProteins[Protein(i)]
-		if !isSelf {
-			tCells = append(tCells, MakeTCell(dna, Protein(i)))
-		}
-	}
-	return
-}
-
-type DendriticCell struct {
-	Leukocyte
-	proteinSignatures map[Protein]bool
-}
-
-func (d *DendriticCell) Collect(t AntigenPresenting) {
-	for _, p := range t.PresentAntigen(false).proteins {
-		d.proteinSignatures[p] = false
-	}
-}
-
-func (d *DendriticCell) FoundMatch(t *TCell) bool {
-	_, found := d.proteinSignatures[t.proteinReceptor]
-	if found {
-		d.proteinSignatures[t.proteinReceptor] = found
-	}
-	return found
-}
-
-func MakeDendriticCell(dna *DNA) *DendriticCell {
-	return &DendriticCell{
-		Leukocyte: Leukocyte{
-			Cell: Cell{
-				cellType: Dendritic,
-				dna:      dna,
-				mhc_i:    dna.MHC_I(),
-			},
-		},
-		proteinSignatures: make(map[Protein]bool),
 	}
 }

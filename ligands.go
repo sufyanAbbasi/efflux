@@ -12,6 +12,13 @@ type ResourceBlobData struct {
 	Vitamins int
 }
 
+func offset(val int) (offset int) {
+	if val%2 == 0 {
+		offset = 1
+	}
+	return
+}
+
 func (r *ResourceBlob) Consume(need *ResourceBlob) {
 	if r.o2 >= need.o2 {
 		r.o2 -= need.o2
@@ -49,16 +56,19 @@ func (r *ResourceBlob) Split() *ResourceBlob {
 		vitamins: 0,
 	}
 	if r.o2 > 1 {
+		offset := offset(r.o2)
 		r.o2 /= 2
-		keep.o2 += r.o2
+		keep.o2 += r.o2 + offset
 	}
 	if r.glucose > 1 {
+		offset := offset(r.glucose)
 		r.glucose /= 2
-		keep.glucose += r.glucose
+		keep.glucose += r.glucose + offset
 	}
 	if r.vitamins > 1 {
+		offset := offset(r.vitamins)
 		r.vitamins /= 2
-		keep.vitamins += r.vitamins
+		keep.vitamins += r.vitamins + offset
 	}
 	return keep
 }
@@ -84,12 +94,14 @@ func (w *WasteBlob) Split() *WasteBlob {
 		creatinine: 0,
 	}
 	if w.co2 > 1 {
+		offset := offset(w.co2)
 		w.co2 /= 2
-		keep.co2 += w.co2
+		keep.co2 += w.co2 + offset
 	}
 	if w.creatinine > 1 {
+		offset := offset(w.creatinine)
 		w.creatinine /= 2
-		keep.creatinine += w.creatinine
+		keep.creatinine += w.creatinine + offset
 	}
 	return keep
 }
@@ -116,20 +128,48 @@ func (l *LigandBlob) Split() *LigandBlob {
 		inflammation: 0,
 	}
 	if l.growth > 1 {
+		offset := offset(l.growth)
 		l.growth /= 2
-		keep.growth += l.growth
+		keep.growth += l.growth + offset
 	}
 	if l.hunger > 1 {
+		offset := offset(l.hunger)
 		l.hunger /= 2
-		keep.hunger += l.hunger
+		keep.hunger += l.hunger + offset
 	}
 	if l.asphyxia > 1 {
+		offset := offset(l.asphyxia)
 		l.asphyxia /= 2
-		keep.asphyxia += l.asphyxia
+		keep.asphyxia += l.asphyxia + offset
 	}
 	if l.inflammation > 1 {
+		offset := offset(l.inflammation)
 		l.inflammation /= 2
-		keep.inflammation += l.inflammation
+		keep.inflammation += l.inflammation + offset
+	}
+	return keep
+}
+
+type HormoneBlob struct {
+	colony_stimulating_factor int
+}
+
+type HormoneBlobData struct {
+	ColonyStimulatingFactor int
+}
+
+func (h *HormoneBlob) Add(hormone *HormoneBlob) {
+	h.colony_stimulating_factor += hormone.colony_stimulating_factor
+}
+
+func (h *HormoneBlob) Split() *HormoneBlob {
+	keep := &HormoneBlob{
+		colony_stimulating_factor: 0,
+	}
+	if h.colony_stimulating_factor > 1 {
+		offset := offset(h.colony_stimulating_factor)
+		h.colony_stimulating_factor /= 2
+		keep.colony_stimulating_factor += h.colony_stimulating_factor + offset
 	}
 	return keep
 }
@@ -213,10 +253,38 @@ func (p *LigandPool) Start() {
 	}
 }
 
+type HormonePool struct {
+	hormones    *HormoneBlob
+	hormoneChan chan *HormoneBlob
+	wantChan    chan struct{}
+}
+
+func (p *HormonePool) Get() *HormoneBlob {
+	p.wantChan <- struct{}{}
+	return <-p.hormoneChan
+}
+
+func (p *HormonePool) Put(r *HormoneBlob) {
+	p.hormoneChan <- r
+}
+
+func (p *HormonePool) Start() {
+	for {
+		select {
+		case r := <-p.hormoneChan:
+			p.hormones.Add(r)
+		default:
+			<-p.wantChan
+			p.hormoneChan <- p.hormones.Split()
+		}
+	}
+}
+
 type MaterialPool struct {
 	resourcePool *ResourcePool
 	wastePool    *WastePool
 	ligandPool   *LigandPool
+	hormonePool  *HormonePool
 }
 
 func InitializeMaterialPool() *MaterialPool {
@@ -245,10 +313,18 @@ func InitializeMaterialPool() *MaterialPool {
 			ligandChan: make(chan *LigandBlob, POOL_SIZE),
 			wantChan:   make(chan struct{}, POOL_SIZE),
 		},
+		hormonePool: &HormonePool{
+			hormones: &HormoneBlob{
+				colony_stimulating_factor: SEED_COLONY_STIMULATING_FACTOR,
+			},
+			hormoneChan: make(chan *HormoneBlob, POOL_SIZE),
+			wantChan:    make(chan struct{}, POOL_SIZE),
+		},
 	}
 	go m.resourcePool.Start()
 	go m.wastePool.Start()
 	go m.ligandPool.Start()
+	go m.hormonePool.Start()
 	return m
 }
 
@@ -286,4 +362,18 @@ func (m *MaterialPool) GetLigand() *LigandBlob {
 
 func (m *MaterialPool) PutLigand(l *LigandBlob) {
 	m.ligandPool.Put(l)
+}
+
+func (m *MaterialPool) GetHormone() *HormoneBlob {
+	return m.hormonePool.Get()
+}
+
+func (m *MaterialPool) SplitHormone() *HormoneBlob {
+	blob := m.hormonePool.Get()
+	m.PutHormone(blob.Split())
+	return blob
+}
+
+func (m *MaterialPool) PutHormone(c *HormoneBlob) {
+	m.hormonePool.Put(c)
 }

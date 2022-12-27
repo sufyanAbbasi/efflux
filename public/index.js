@@ -19,7 +19,7 @@ const cy = cytoscape({
           'border-width': '2px',
           'border-color': 'black',
           'width': '550px',
-          'height': '180px',
+          'height': '200px',
           'text-wrap': 'wrap',
           'text-justification': 'left',
           'font-family': 'monospace',
@@ -138,7 +138,7 @@ class Node {
         labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-
+        labels.push(`${makePadding('csf: ' + materialStatus.csf)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
     }
