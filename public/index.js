@@ -2,6 +2,8 @@ import {html, render} from 'https://unpkg.com/lit-html?module';
 
 const NodeMap = new Map();
 const PendingCloseSockets = new WeakMap();
+const LastRenderTime = new Map();
+const RENDER_TIMEOUT = 3000; // 3s
 
 const cy = cytoscape({
 
@@ -138,7 +140,7 @@ class Node {
         labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-        labels.push(`${makePadding('csf: ' + materialStatus.csf)}`);
+        labels.push(`${makePadding('csf: ' + materialStatus.csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
     }
@@ -371,6 +373,16 @@ class Render {
             el.object3D.visible = visible;
             el.object3D.position.set(x, -y, z)
         }
+        LastRenderTime.set(id, Date.now());
+    }
+}
+
+function garbageCollector() {
+    for (let [id, lastRenderTime] of LastRenderTime) {
+        if (Date.now() - lastRenderTime > RENDER_TIMEOUT) {
+            document.querySelector(`#${id}`)?.remove();
+            LastRenderTime.delete(id);
+        }
     }
 }
 
@@ -389,6 +401,7 @@ function init() {
         const node = NodeMap.get(clickedNode.data('address'));
         node?.renderScene()
       });
+    setInterval(garbageCollector, RENDER_TIMEOUT);
 }
 
 window.addEventListener('DOMContentLoaded', init);

@@ -34,6 +34,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		b.skinNodes,
 		b.gutNodes,
 		b.kidneyNodes,
+		b.boneNodes,
 	}
 	cellTypes := []CellType{
 		RedBlood,
@@ -44,6 +45,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Keratinocyte,
 		Enterocyte,
 		Podocyte,
+		Hemocytoblast,
 	}
 
 	workTypes := []WorkType{
@@ -55,6 +57,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		cover,    // Skin
 		digest,   // Gut
 		filter,   // Kidney
+		nothing,  // BoneMarrow
 	}
 
 	counts := []int{
@@ -66,6 +69,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		1, // Skin
 		1, // Gut
 		1, // Kidney
+		1, // BoneMarrow
 	}
 	humanDNA := MakeDNA(HUMAN_DNA, HUMAN_NAME)
 	for i, nodes := range nodeTypes {
@@ -92,7 +96,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			cellType := cellTypes[i]
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], 0, "")
+				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], nothing, "")
 			}
 		}
 	}

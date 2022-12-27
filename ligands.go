@@ -151,25 +151,34 @@ func (l *LigandBlob) Split() *LigandBlob {
 }
 
 type HormoneBlob struct {
-	colony_stimulating_factor int
+	colony_stimulating_factor            int
+	macrophage_colony_stimulating_factor int
 }
 
 type HormoneBlobData struct {
-	ColonyStimulatingFactor int
+	ColonyStimulatingFactor           int
+	MacrophageColonyStimulatingFactor int
 }
 
 func (h *HormoneBlob) Add(hormone *HormoneBlob) {
 	h.colony_stimulating_factor += hormone.colony_stimulating_factor
+	h.macrophage_colony_stimulating_factor += hormone.macrophage_colony_stimulating_factor
 }
 
 func (h *HormoneBlob) Split() *HormoneBlob {
 	keep := &HormoneBlob{
-		colony_stimulating_factor: 0,
+		colony_stimulating_factor:            0,
+		macrophage_colony_stimulating_factor: 0,
 	}
 	if h.colony_stimulating_factor > 1 {
 		offset := offset(h.colony_stimulating_factor)
 		h.colony_stimulating_factor /= 2
 		keep.colony_stimulating_factor += h.colony_stimulating_factor + offset
+	}
+	if h.macrophage_colony_stimulating_factor > 1 {
+		offset := offset(h.macrophage_colony_stimulating_factor)
+		h.macrophage_colony_stimulating_factor /= 2
+		keep.macrophage_colony_stimulating_factor += h.macrophage_colony_stimulating_factor + offset
 	}
 	return keep
 }
@@ -315,7 +324,8 @@ func InitializeMaterialPool() *MaterialPool {
 		},
 		hormonePool: &HormonePool{
 			hormones: &HormoneBlob{
-				colony_stimulating_factor: SEED_COLONY_STIMULATING_FACTOR,
+				colony_stimulating_factor:            SEED_COLONY_STIMULATING_FACTOR,
+				macrophage_colony_stimulating_factor: SEED_MACROPHAGE_COLONY_STIMULATING_FACTOR,
 			},
 			hormoneChan: make(chan *HormoneBlob, POOL_SIZE),
 			wantChan:    make(chan struct{}, POOL_SIZE),

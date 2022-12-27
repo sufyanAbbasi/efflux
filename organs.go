@@ -18,15 +18,16 @@ import (
 type WorkType int
 
 const (
-	diffusion WorkType = iota
-	cover              // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	exchange           // Called on blood cells by other cells.
-	exhale             // Called on lung cells by blood cells.
-	pump               // Called on to heart cells to pump, by brain cels.
-	move               // Called on muscle cells by brain cells.
-	think              // Called on brain cells to perform a computation, by muscle cells.
-	digest             // Called on gut cells, by muscle cells.
-	filter             // Called on kidney cellzs, by blood cells.
+	nothing WorkType = iota
+	diffusion
+	cover    // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
+	exchange // Called on blood cells by other cells.
+	exhale   // Called on lung cells by blood cells.
+	pump     // Called on to heart cells to pump, by brain cels.
+	move     // Called on muscle cells by brain cells.
+	think    // Called on brain cells to perform a computation, by muscle cells.
+	digest   // Called on gut cells, by muscle cells.
+	filter   // Called on kidney cellzs, by blood cells.
 )
 
 func (w WorkType) String() string {
@@ -105,6 +106,7 @@ type MaterialStatusData struct {
 	Asphyxia     int `json:"asphyxia"`
 	Inflammation int `json:"inflammation"`
 	CSF          int `json:"csf"`
+	M_CSF        int `json:"m_csf"`
 }
 
 type TransportRequest struct {
@@ -219,47 +221,7 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 	if render == nil {
 		render = &Renderable{}
 	}
-	var cell CellActor
-	switch request.CellType {
-	case Bacterial:
-		fallthrough
-	case Bacteroidota:
-		cell = CopyProkaryoticCell(&ProkaryoticCell{
-			Cell: &Cell{
-				cellType: request.CellType,
-				dna:      dna,
-				render:   render,
-			},
-		})
-	case RedBlood:
-		fallthrough
-	case Neuron:
-		fallthrough
-	case Cardiomyocyte:
-		fallthrough
-	case Pneumocyte:
-		fallthrough
-	case Myocyte:
-		fallthrough
-	case Keratinocyte:
-		fallthrough
-	case Enterocyte:
-		fallthrough
-	case TLymphocyte:
-		fallthrough
-	case Dendritic:
-		fallthrough
-	default:
-		cell = CopyEukaryoticStemCell(&EukaryoticCell{
-			Cell: &Cell{
-				cellType: request.CellType,
-				dna:      dna,
-				workType: request.WorkType,
-				render:   render,
-			},
-		})
-	}
-	return cell, nil
+	return MakeCellFromType(request.CellType, request.WorkType, dna, render), nil
 }
 
 func SendWork(connection *Connection, request Work) {
@@ -558,7 +520,8 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	hormone := n.materialPool.GetHormone()
 	defer n.materialPool.PutHormone(hormone)
 	hormone.Add(&HormoneBlob{
-		colony_stimulating_factor: data.Hormone.ColonyStimulatingFactor,
+		colony_stimulating_factor:            data.Hormone.ColonyStimulatingFactor,
+		macrophage_colony_stimulating_factor: data.Hormone.MacrophageColonyStimulatingFactor,
 	})
 }
 
@@ -604,6 +567,7 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				Asphyxia:     n.materialPool.ligandPool.ligands.asphyxia,
 				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
 				CSF:          n.materialPool.hormonePool.hormones.colony_stimulating_factor,
+				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_colony_stimulating_factor,
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
@@ -707,7 +671,8 @@ func (n *Node) SendDiffusion() {
 				Creatinine: waste.creatinine,
 			},
 			Hormone: HormoneBlobData{
-				ColonyStimulatingFactor: hormone.colony_stimulating_factor,
+				ColonyStimulatingFactor:           hormone.colony_stimulating_factor,
+				MacrophageColonyStimulatingFactor: hormone.macrophage_colony_stimulating_factor,
 			},
 		})
 		if err != nil {

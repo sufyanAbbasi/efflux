@@ -131,7 +131,13 @@ func (t *Tissue) Stream(connection *Connection) {
 		case <-t.ctx.Done():
 			return
 		default:
-			t.StreamMatrices(connection)
+			err := t.StreamMatrices(connection)
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					fmt.Printf("error: %v", err)
+				}
+				return
+			}
 			r := make(chan RenderableData, RENDER_BUFFER_SIZE)
 			t.streamingChan <- r
 			for renderable := range r {
@@ -149,31 +155,27 @@ func (t *Tissue) Stream(connection *Connection) {
 	}
 }
 
-func (t *Tissue) StreamMatrices(connection *Connection) {
+func (t *Tissue) StreamMatrices(connection *Connection) error {
 	matrix := t.rootMatrix
 	for matrix != nil {
 		buf := new(bytes.Buffer)
 		err := png.Encode(buf, matrix)
 		if err != nil {
 			fmt.Printf("Error while encoding png: %v", err)
-			return
+			return err
 		}
 		img, err := MakeTitledPng(buf, matrix.RenderMetadata())
 		if err != nil {
 			fmt.Printf("Error while encoding png: %v", err)
-			return
+			return err
 		}
 		err = connection.WriteMessage(websocket.BinaryMessage, img.Bytes())
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				fmt.Printf("error: %v", err)
-			} else {
-				fmt.Println("Render socket closed")
-			}
-			return
+			return err
 		}
 		matrix = matrix.next
 	}
+	return nil
 }
 
 func (t *Tissue) Tick() {
@@ -323,16 +325,16 @@ func (w *Walls) InBounds(pt image.Point) bool {
 		return inBounds
 	}
 	if w.mainStage.InBounds(pt) {
-		w.RLock()
+		w.Lock()
 		w.inBoundsCache[pt] = true
-		w.RUnlock()
+		w.Unlock()
 		return true
 	}
 	for _, b := range w.bridges {
 		if b.InBounds(pt) {
-			w.RLock()
+			w.Lock()
 			w.inBoundsCache[pt] = true
-			w.RUnlock()
+			w.Unlock()
 			return true
 		}
 	}

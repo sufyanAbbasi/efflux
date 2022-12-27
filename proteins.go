@@ -27,6 +27,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 			cell.BroadcastPosition(ctx)
 			select {
 			case <-ctx.Done():
+				cell.CleanUp()
 				return
 			case <-ticker.C:
 				if s.current != nil {
@@ -143,8 +144,10 @@ func Explore(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func MoveTowardsChemotaxisCytokine(ctx context.Context, cell CellActor) bool {
-	cell.MoveTowardsCytokine(induce_chemotaxis)
+func MoveTowardsChemotaxisCytokineOrExplore(ctx context.Context, cell CellActor) bool {
+	if !cell.MoveTowardsCytokine(induce_chemotaxis) {
+		return Explore(ctx, cell)
+	}
 	return true
 }
 
@@ -372,6 +375,13 @@ func Interact(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
+func ShouldTransport(ctx context.Context, cell CellActor) bool {
+	if cell.ShouldTransport() {
+		return !cell.Transport()
+	}
+	return true
+}
+
 func GenerateRandomProteinPermutation(c CellActor) (proteins []Protein) {
 	chooseN := len(proteins) / 3
 	permutations := rand.Perm(chooseN)
@@ -389,13 +399,35 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
-				action:   DoWork,
+				action:   WillMitosisAndRepair,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		},
 	}
 	currNode := s.root
 	switch c.CellType() {
+	case Pneumocyte:
+		fallthrough
+	case Keratinocyte:
+		fallthrough
+	case Podocyte:
+		fallthrough
+	case Hemocytoblast:
+		fallthrough
+	case Lymphoblast:
+		fallthrough
+	case Myeloblast:
+		fallthrough
+	case Macrophagocyte:
+		fallthrough
+	case Neutrocytes:
+		fallthrough
+	case LargeGranularLymphocytes:
+		fallthrough
+	case TLymphocyte:
+		fallthrough
+	case Dendritic:
+		// Do nothing special.
 	case RedBlood:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
@@ -464,12 +496,6 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
-	case Pneumocyte:
-		fallthrough
-	case Keratinocyte:
-		fallthrough
-	case Podocyte:
-		// Do nothing but work.
 	case Myocyte:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
@@ -500,7 +526,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	if c.CanMove() {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
-				action:   MoveTowardsChemotaxisCytokine,
+				action:   MoveTowardsChemotaxisCytokineOrExplore,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
@@ -515,15 +541,26 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		}
 		currNode = currNode.next
 	}
-	currNode.next = &StateNode{
-		function: &ProteinFunction{
-			action:   WillMitosisAndRepair,
-			proteins: GenerateRandomProteinPermutation(c),
-		},
+	if c.DoesWork() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   DoWork,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
 	}
-	currNode = currNode.next
+	if c.CanTransport() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   ShouldTransport,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
 	currNode.next = &StateNode{
-		next: s.root, // Do Work
+		next: s.root, // Loop back.
 		function: &ProteinFunction{
 			action:   ShouldApoptosis,
 			proteins: GenerateRandomProteinPermutation(c),
@@ -534,7 +571,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 
 // Bacteria Related CellActions
 
-func MoveAwayFromChemotaxisCytokineOrRandomly(ctx context.Context, cell CellActor) bool {
+func MoveAwayFromChemotaxisCytokineOrExplore(ctx context.Context, cell CellActor) bool {
 	if !cell.MoveAwayFromCytokine(induce_chemotaxis) {
 		return Explore(ctx, cell)
 	}
@@ -598,6 +635,10 @@ func BacteriaShouldApoptosis(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
+func BacteriaShouldTransport(ctx context.Context, cell CellActor) bool {
+	return true
+}
+
 func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
@@ -618,7 +659,16 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	if c.CanMove() {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
-				action:   MoveAwayFromChemotaxisCytokineOrRandomly,
+				action:   MoveAwayFromChemotaxisCytokineOrExplore,
+				proteins: GenerateRandomProteinPermutation(c),
+			},
+		}
+		currNode = currNode.next
+	}
+	if c.CanTransport() {
+		currNode.next = &StateNode{
+			function: &ProteinFunction{
+				action:   BacteriaShouldTransport,
 				proteins: GenerateRandomProteinPermutation(c),
 			},
 		}
