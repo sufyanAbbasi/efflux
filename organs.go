@@ -116,6 +116,8 @@ type TransportRequest struct {
 	CellType       CellType
 	WorkType       WorkType
 	ParentRenderID string
+	TransportPath  [10]string
+	WantPath       [10]string
 }
 
 type EdgeType int
@@ -141,6 +143,8 @@ func MakeTransportRequest(
 	cellType CellType,
 	workType WorkType,
 	parentRenderID string,
+	transportPath [10]string,
+	wantPath [10]string,
 ) error {
 	dnaBase, err := dna.Serialize()
 	if err != nil {
@@ -159,6 +163,8 @@ func MakeTransportRequest(
 		CellType:       cellType,
 		WorkType:       workType,
 		ParentRenderID: parentRenderID,
+		TransportPath:  transportPath,
+		WantPath:       wantPath,
 	})
 	if err != nil {
 		return fmt.Errorf("transport error: %v", err)
@@ -196,8 +202,8 @@ func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	cell.SetOrgan(n)
+	cell.RecordTransport()
 	fmt.Println("Spawned:", cell, "in", cell.Organ())
 	ctx, stop := context.WithCancel(context.Background())
 	cell.SetStop(stop)
@@ -221,7 +227,7 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 	if render == nil {
 		render = &Renderable{}
 	}
-	return MakeCellFromType(request.CellType, request.WorkType, dna, render), nil
+	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.TransportPath, request.WantPath), nil
 }
 
 func SendWork(connection *Connection, request Work) {

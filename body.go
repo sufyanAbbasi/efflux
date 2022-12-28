@@ -75,7 +75,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "")
+				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "", [10]string{}, [10]string{})
 			}
 		}
 	}
@@ -96,7 +96,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			cellType := cellTypes[i]
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], nothing, "")
+				MakeTransportRequest(node.transportUrl, cellType.String(), bacteriaDNA, cellTypes[i], nothing, "", [10]string{}, [10]string{})
 			}
 		}
 	}

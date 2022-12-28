@@ -111,22 +111,25 @@ type CellActor interface {
 	CanTransport() bool
 	ShouldTransport() bool
 	Transport() bool
+	RecordTransport()
 }
 
 type Cell struct {
 	sync.RWMutex
-	cellType     CellType
-	dna          *DNA
-	mhc_i        MHC_I
-	antigen      *Antigen
-	workType     WorkType
-	organ        *Node
-	resourceNeed *ResourceBlob
-	damage       int
-	function     *StateDiagram
-	oxygenated   bool
-	render       *Renderable
-	stop         context.CancelFunc
+	cellType      CellType
+	dna           *DNA
+	mhc_i         MHC_I
+	antigen       *Antigen
+	workType      WorkType
+	organ         *Node
+	resourceNeed  *ResourceBlob
+	damage        int
+	function      *StateDiagram
+	oxygenated    bool
+	render        *Renderable
+	stop          context.CancelFunc
+	transportPath [10]string
+	wantPath      [10]string
 }
 
 func (c *Cell) String() string {
@@ -557,12 +560,34 @@ func (c *Cell) Transport() bool {
 		return false
 	}
 	edge := transportEdges[rand.Intn(len(transportEdges))]
-	err := MakeTransportRequest(edge.transportUrl, c.dna.name, c.dna, c.cellType, c.workType, string(c.render.id))
+	err := MakeTransportRequest(edge.transportUrl, c.dna.name, c.dna, c.cellType, c.workType, string(c.render.id), c.transportPath, c.wantPath)
 	if err != nil {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
 	}
 	return true
+}
+
+func (c *Cell) RecordTransport() {
+	currentUrl := c.organ.transportUrl
+
+	var transportPath [10]string
+	copy(transportPath[0:], c.transportPath[1:])
+	transportPath[9] = currentUrl
+	c.transportPath = transportPath
+
+	// Find the last found index of this location and truncate the want path up to it.
+	var wantPath [10]string
+	endIndex := len(c.wantPath) - 1
+	found := false
+	for i := endIndex; i >= 0 && !found; i-- {
+		if !found && c.wantPath[i] == currentUrl {
+			found = true
+			endIndex = i
+		}
+	}
+	copy(wantPath[len(wantPath)-endIndex:], c.wantPath[0:endIndex])
+	c.wantPath = wantPath
 }
 
 type EukaryoticCell struct {
@@ -599,7 +624,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) {
 	if e.organ == nil {
 		return
 	}
-	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id))
+	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath)
 }
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
@@ -620,15 +645,15 @@ func (e *EukaryoticCell) CleanUp() {
 
 func (e *EukaryoticCell) WillMitosis() bool {
 	if e.cellType == Hemocytoblast {
-		// Bootstrap the mitosis function to spawn.
+		// Bootstrap the mitosis function to spawn leukocyte stem cells.
 		hormone := e.organ.materialPool.GetHormone()
 		if hormone.colony_stimulating_factor >= HORMONE_CSF_THRESHOLD {
 			hormone.colony_stimulating_factor -= HORMONE_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id))
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
 		if hormone.macrophage_colony_stimulating_factor >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_colony_stimulating_factor -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id))
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
 		e.organ.materialPool.PutHormone(hormone)
 	}
@@ -673,6 +698,7 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 				targetZ:       base.render.targetZ,
 				lastPositions: positionTracker,
 			},
+			transportPath: base.transportPath,
 		},
 	}
 }
@@ -795,6 +821,7 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -836,6 +863,7 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -877,6 +905,7 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -918,6 +947,7 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -970,6 +1000,7 @@ func CopyTCell(base *TCell) *TCell {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -1027,6 +1058,7 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
 				},
+				transportPath: base.transportPath,
 			},
 			spawnTime: time.Now(),
 			lifeSpan:  base.lifeSpan,
@@ -1067,6 +1099,7 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 				targetZ:       base.render.targetZ,
 				lastPositions: positionTracker,
 			},
+			transportPath: base.transportPath,
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -1104,7 +1137,7 @@ func (p *ProkaryoticCell) Mitosis(ctx context.Context) {
 	if p.organ == nil {
 		return
 	}
-	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id))
+	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), p.transportPath, p.wantPath)
 }
 
 func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {
@@ -1150,7 +1183,7 @@ func (v *Virus) InfectCell(c CellActor) {
 	}
 }
 
-func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable) (cell CellActor) {
+func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string) (cell CellActor) {
 	switch cellType {
 	// Bacteria
 	case Bacterial:
@@ -1158,9 +1191,11 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 	case Bacteroidota:
 		cell = CopyProkaryoticCell(&ProkaryoticCell{
 			Cell: &Cell{
-				cellType: cellType,
-				dna:      dna,
-				render:   render,
+				cellType:      cellType,
+				dna:           dna,
+				render:        render,
+				transportPath: transportPath,
+				wantPath:      wantPath,
 			},
 		})
 	// Leukocytes
@@ -1170,10 +1205,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyLeukocyteStemCell(&LeukocyteStemCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  LEUKOCYTE_STEM_CELL_LIFE_SPAN,
@@ -1183,10 +1220,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyMacrophage(&Macrophage{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  MACROPHAGE_LIFE_SPAN,
@@ -1196,10 +1235,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyNeutrophil(&Neutrophil{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  NEUTROPHIL_LIFE_SPAN,
@@ -1209,10 +1250,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyNaturalKiller(&NaturalKiller{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  NATURALKILLER_LIFE_SPAN,
@@ -1222,10 +1265,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyTCell(&TCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  TCELL_LIFE_SPAN,
@@ -1235,10 +1280,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		cell = CopyDendriticCell(&DendriticCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
-					cellType: cellType,
-					dna:      dna,
-					workType: workType,
-					render:   render,
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
 				},
 				spawnTime: time.Now(),
 				lifeSpan:  DENDRITIC_CELL_LIFE_SPAN,
@@ -1261,10 +1308,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 	default:
 		cell = CopyEukaryoticCell(&EukaryoticCell{
 			Cell: &Cell{
-				cellType: cellType,
-				dna:      dna,
-				workType: workType,
-				render:   render,
+				cellType:      cellType,
+				dna:           dna,
+				workType:      workType,
+				render:        render,
+				transportPath: transportPath,
+				wantPath:      wantPath,
 			},
 		})
 	}
