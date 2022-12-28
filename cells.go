@@ -550,7 +550,6 @@ func (c *Cell) Transport() bool {
 	for _, e := range o.edges {
 		switch e.edgeType {
 		case blood_brain_barrier:
-
 			fallthrough
 		case neuronal:
 			// Pass

@@ -62,7 +62,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 
 	counts := []int{
 		1, // Blood
-		1, // Brain
+		3, // Brain
 		1, // Heart
 		1, // Lungs
 		1, // Muscles
@@ -76,6 +76,10 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "", [10]string{}, [10]string{})
+			}
+			if cellTypes[i] == Neuron {
+				// Add a Hemocytoblast to the brain, to spawn immune cells.
+				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, Hemocytoblast, nothing, "", [10]string{}, [10]string{})
 			}
 		}
 	}
@@ -170,7 +174,7 @@ func GenerateBody(ctx context.Context) *Body {
 	// Blood
 
 	bloodBrain := InitializeNewNode(ctx, b.Graph, "Blood - Brain")
-	ConnectNodes(ctx, bloodBrain, brain, blood_brain_barrier, cardiovascular)
+	ConnectNodes(ctx, bloodBrain, brain, blood_brain_barrier, blood_brain_barrier)
 	ConnectNodes(ctx, bloodBrain, lungLeft, muscular, cardiovascular)
 	ConnectNodes(ctx, bloodBrain, lungRight, muscular, cardiovascular)
 	ConnectNodes(ctx, bloodBrain, kidneyLeft, muscular, cardiovascular)
