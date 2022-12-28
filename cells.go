@@ -546,10 +546,12 @@ func (c *Cell) Transport() bool {
 	if o == nil {
 		return false
 	}
-	// Pick a random, valid edge to transport to.
 	var transportEdges []*Edge
 	for _, e := range o.edges {
 		switch e.edgeType {
+		case blood_brain_barrier:
+
+			fallthrough
 		case neuronal:
 			// Pass
 		default:
@@ -559,7 +561,24 @@ func (c *Cell) Transport() bool {
 	if len(transportEdges) == 0 {
 		return false
 	}
-	edge := transportEdges[rand.Intn(len(transportEdges))]
+	var edge *Edge
+	// Pick an edge from the want path if it exists, starting from the end.
+	foundIndex := -1
+	found := false
+	for i := len(c.wantPath) - 1; i >= 0 && !found; i-- {
+		for _, e := range transportEdges {
+			if c.wantPath[i] == e.transportUrl {
+				found = true
+				foundIndex = i
+			}
+		}
+	}
+	if foundIndex >= 0 {
+		edge = transportEdges[foundIndex]
+	} else {
+		// Pick a random, valid edge to transport to.
+		edge = transportEdges[rand.Intn(len(transportEdges))]
+	}
 	err := MakeTransportRequest(edge.transportUrl, c.dna.name, c.dna, c.cellType, c.workType, string(c.render.id), c.transportPath, c.wantPath)
 	if err != nil {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
@@ -581,7 +600,7 @@ func (c *Cell) RecordTransport() {
 	endIndex := len(c.wantPath) - 1
 	found := false
 	for i := endIndex; i >= 0 && !found; i-- {
-		if !found && c.wantPath[i] == currentUrl {
+		if c.wantPath[i] == currentUrl {
 			found = true
 			endIndex = i
 		}

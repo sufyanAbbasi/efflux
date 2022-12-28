@@ -128,6 +128,7 @@ const (
 	lymphatic
 	muscular
 	skeletal
+	blood_brain_barrier
 )
 
 type Edge struct {

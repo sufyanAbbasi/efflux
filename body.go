@@ -170,7 +170,7 @@ func GenerateBody(ctx context.Context) *Body {
 	// Blood
 
 	bloodBrain := InitializeNewNode(ctx, b.Graph, "Blood - Brain")
-	ConnectNodes(ctx, bloodBrain, brain, muscular, cardiovascular)
+	ConnectNodes(ctx, bloodBrain, brain, blood_brain_barrier, cardiovascular)
 	ConnectNodes(ctx, bloodBrain, lungLeft, muscular, cardiovascular)
 	ConnectNodes(ctx, bloodBrain, lungRight, muscular, cardiovascular)
 	ConnectNodes(ctx, bloodBrain, kidneyLeft, muscular, cardiovascular)
