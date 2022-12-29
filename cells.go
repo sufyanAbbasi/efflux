@@ -89,6 +89,7 @@ type CellActor interface {
 	Position() image.Point
 	LastPositions() *ring.Ring
 	BroadcastPosition(ctx context.Context)
+	SpawnTime() time.Time
 	Function() *StateDiagram
 	WillMitosis() bool
 	Mitosis(ctx context.Context) bool
@@ -130,6 +131,7 @@ type Cell struct {
 	stop          context.CancelFunc
 	transportPath [10]string
 	wantPath      [10]string
+	spawnTime     time.Time
 }
 
 func (c *Cell) String() string {
@@ -435,6 +437,10 @@ func (c *Cell) LastPositions() *ring.Ring {
 	return c.render.lastPositions
 }
 
+func (c *Cell) SpawnTime() time.Time {
+	return c.spawnTime
+}
+
 func (c *Cell) CanMove() bool {
 	return false
 }
@@ -727,8 +733,7 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 
 type Leukocyte struct {
 	*Cell
-	spawnTime time.Time
-	lifeSpan  time.Duration
+	lifeSpan time.Duration
 }
 
 type AntigenPresenting interface {
@@ -864,9 +869,10 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 	}
 }
@@ -906,9 +912,10 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 	}
 }
@@ -948,9 +955,10 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 	}
 }
@@ -990,9 +998,10 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 	}
 }
@@ -1043,9 +1052,10 @@ func CopyTCell(base *TCell) *TCell {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 		proteinReceptor: base.proteinReceptor,
 	}
@@ -1101,9 +1111,10 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 					lastPositions: positionTracker,
 				},
 				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
 			},
-			spawnTime: time.Now(),
-			lifeSpan:  base.lifeSpan,
+			lifeSpan: base.lifeSpan,
 		},
 		proteinSignatures: base.proteinSignatures,
 	}
@@ -1142,6 +1153,8 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 				lastPositions: positionTracker,
 			},
 			transportPath: base.transportPath,
+			wantPath:      base.wantPath,
+			spawnTime:     time.Now(),
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -1239,6 +1252,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				render:        render,
 				transportPath: transportPath,
 				wantPath:      wantPath,
+				spawnTime:     time.Now(),
 			},
 		})
 	// Leukocytes
@@ -1254,9 +1268,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  LEUKOCYTE_STEM_CELL_LIFE_SPAN,
+				lifeSpan: LEUKOCYTE_STEM_CELL_LIFE_SPAN,
 			},
 		})
 	case Macrophagocyte:
@@ -1269,9 +1283,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  MACROPHAGE_LIFE_SPAN,
+				lifeSpan: MACROPHAGE_LIFE_SPAN,
 			},
 		})
 	case Neutrocytes:
@@ -1284,9 +1298,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  NEUTROPHIL_LIFE_SPAN,
+				lifeSpan: NEUTROPHIL_LIFE_SPAN,
 			},
 		})
 	case LargeGranularLymphocytes:
@@ -1299,9 +1313,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  NATURALKILLER_LIFE_SPAN,
+				lifeSpan: NATURALKILLER_LIFE_SPAN,
 			},
 		})
 	case TLymphocyte:
@@ -1314,9 +1328,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  TCELL_LIFE_SPAN,
+				lifeSpan: TCELL_LIFE_SPAN,
 			},
 		})
 	case Dendritic:
@@ -1329,9 +1343,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
+					spawnTime:     time.Now(),
 				},
-				spawnTime: time.Now(),
-				lifeSpan:  DENDRITIC_CELL_LIFE_SPAN,
+				lifeSpan: DENDRITIC_CELL_LIFE_SPAN,
 			},
 		})
 	case RedBlood:
@@ -1357,6 +1371,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				render:        render,
 				transportPath: transportPath,
 				wantPath:      wantPath,
+				spawnTime:     time.Now(),
 			},
 		})
 	}
