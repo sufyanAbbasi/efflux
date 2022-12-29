@@ -91,7 +91,7 @@ type CellActor interface {
 	BroadcastPosition(ctx context.Context)
 	Function() *StateDiagram
 	WillMitosis() bool
-	Mitosis(ctx context.Context)
+	Mitosis(ctx context.Context) bool
 	CollectResources(context.Context) bool
 	ProduceWaste()
 	Damage() int
@@ -638,11 +638,12 @@ func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
 	return e.function.current.function.proteins
 }
 
-func (e *EukaryoticCell) Mitosis(ctx context.Context) {
+func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 	if e.organ == nil {
-		return
+		return false
 	}
 	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath)
+	return true
 }
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
@@ -662,8 +663,9 @@ func (e *EukaryoticCell) CleanUp() {
 }
 
 func (e *EukaryoticCell) WillMitosis() bool {
-	if e.cellType == Hemocytoblast {
-		// Bootstrap the mitosis function to spawn leukocyte stem cells.
+	switch e.cellType {
+	case Hemocytoblast:
+		// Bootstrap the mitosis function to spawn leukocyte stem cells, but only in the present of the hormone.
 		hormone := e.organ.materialPool.GetHormone()
 		if hormone.colony_stimulating_factor >= HORMONE_CSF_THRESHOLD {
 			hormone.colony_stimulating_factor -= HORMONE_CSF_THRESHOLD
@@ -674,13 +676,15 @@ func (e *EukaryoticCell) WillMitosis() bool {
 			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
 		e.organ.materialPool.PutHormone(hormone)
-	}
-	ligand := e.Organ().materialPool.GetLigand()
-	defer e.Organ().materialPool.PutLigand(ligand)
-	if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
-		// Only checked if prior conditions are met.
-		ligand.growth -= LIGAND_GROWTH_THRESHOLD
-		return true
+		return hormone.colony_stimulating_factor >= HORMONE_CSF_THRESHOLD || hormone.macrophage_colony_stimulating_factor >= HORMONE_M_CSF_THRESHOLD
+	default:
+		ligand := e.Organ().materialPool.GetLigand()
+		defer e.Organ().materialPool.PutLigand(ligand)
+		if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
+			// Only checked if prior conditions are met.
+			ligand.growth -= LIGAND_GROWTH_THRESHOLD
+			return true
+		}
 	}
 	return false
 }
@@ -796,12 +800,32 @@ func (i *Leukocyte) CanMove() bool {
 	return true
 }
 
-func (i *Leukocyte) Mitosis(ctx context.Context) {
-	// Can't mitosis.
+func (i *Leukocyte) Mitosis(ctx context.Context) bool {
+	// https://en.wikipedia.org/wiki/Metamyelocyte#/media/File:Hematopoiesis_(human)_diagram_en.svg
+	switch i.cellType {
+	case Lymphoblast:
+		// Can differentiate into Natural Killer, B Cell, and T Cells.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, LargeGranularLymphocytes, nothing, string(i.render.id), i.transportPath, i.wantPath)
+
+	case Myeloblast:
+		// Can differentiate into Neutrophil, Macrophage, and Dendritic.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocytes, nothing, string(i.render.id), i.transportPath, i.wantPath)
+	}
+	// After differentiating, the existing cell will be converted to another, so clean up the existing one.
+	return false
 }
 
 func (i *Leukocyte) WillMitosis() bool {
-	// Need to be spawned via stem cells.
+	// Overloading mitosis with differentiation. Once differentiated, the existing cell will disappear.
+	switch i.cellType {
+	case Lymphoblast:
+		fallthrough
+	case Myeloblast:
+		// If there is no inflammation, don't differentiate.
+		ligand := i.organ.materialPool.GetLigand()
+		defer i.organ.materialPool.PutLigand(ligand)
+		return ligand.inflammation >= LIGAND_INFLAMMATION_THRESHOLD
+	}
 	return false
 }
 
@@ -1150,12 +1174,13 @@ func (p *ProkaryoticCell) WillMitosis() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) Mitosis(ctx context.Context) {
+func (p *ProkaryoticCell) Mitosis(ctx context.Context) bool {
 	p.lastGenerationTime = time.Now()
 	if p.organ == nil {
-		return
+		return false
 	}
 	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), p.transportPath, p.wantPath)
+	return true
 }
 
 func (p *ProkaryoticCell) Oxygenate(oxygenate bool) {

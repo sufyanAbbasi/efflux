@@ -183,7 +183,7 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 		resource.vitamins >= VITAMIN_COST_MITOSIS &&
 		cell.WillMitosis() {
 		resource.vitamins -= VITAMIN_COST_MITOSIS
-		cell.Mitosis(ctx)
+		return cell.Mitosis(ctx)
 	}
 	return true
 }
@@ -600,10 +600,10 @@ func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	default:
 		if resource.glucose >= GLUCOSE_COST_MITOSIS && cell.WillMitosis() {
 			resource.glucose -= GLUCOSE_COST_MITOSIS
-			cell.Mitosis(ctx)
+			return cell.Mitosis(ctx)
 		} else if resource.vitamins >= VITAMIN_COST_MITOSIS && cell.WillMitosis() {
 			resource.vitamins -= VITAMIN_COST_MITOSIS
-			cell.Mitosis(ctx)
+			return cell.Mitosis(ctx)
 		}
 	}
 	return true

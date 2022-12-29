@@ -76,10 +76,10 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "", [10]string{}, [10]string{})
-			}
-			if cellTypes[i] == Neuron {
-				// Add a Hemocytoblast to the brain, to spawn immune cells.
-				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, Hemocytoblast, nothing, "", [10]string{}, [10]string{})
+				if cellTypes[i] == Neuron {
+					// Add a Hemocytoblast to the brain, to spawn immune cells.
+					MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, Hemocytoblast, nothing, "", [10]string{}, [10]string{})
+				}
 			}
 		}
 	}
