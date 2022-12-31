@@ -85,7 +85,7 @@ func hasOrganOrDie(ctx context.Context, cell CellActor) bool {
 }
 
 func DoWork(ctx context.Context, cell CellActor) bool {
-	cell.Organ().MakeAvailable(cell)
+	cell.Organ().MakeAvailable(ctx, cell)
 	return true
 }
 
@@ -417,7 +417,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		fallthrough
 	case Neutrocytes:
 		fallthrough
-	case LargeGranularLymphocytes:
+	case NaturalKillerCell:
 		fallthrough
 	case TLymphocyte:
 		fallthrough
@@ -608,24 +608,6 @@ func BacteriaConsume(ctx context.Context, cell CellActor) bool {
 	if cell.CollectResources(ctx) {
 		cell.Oxygenate(true)
 		cell.ProduceWaste()
-	} else {
-		fmt.Println(cell, "no resources", cell.Organ())
-	}
-	return true
-}
-
-func BacteriaShouldApoptosis(ctx context.Context, cell CellActor) bool {
-	waste := cell.Organ().materialPool.GetWaste(ctx)
-	defer cell.Organ().materialPool.PutWaste(waste)
-	if waste.creatinine >= DAMAGE_CREATININE_THRESHOLD {
-		cell.IncurDamage(1)
-	}
-	if waste.co2 >= DAMAGE_CO2_THRESHOLD {
-		cell.IncurDamage(1)
-	}
-	if cell.Damage() > MAX_DAMAGE {
-		Apoptosis(ctx, cell)
-		return false
 	}
 	return true
 }
@@ -672,7 +654,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	currNode.next = &StateNode{
 		next: s.root, // Back to beginning.
 		function: &ProteinFunction{
-			action:   BacteriaShouldApoptosis,
+			action:   ShouldApoptosis,
 			proteins: GenerateRandomProteinPermutation(c),
 		},
 	}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"log"
+	"sync"
 )
 
 type ResourceBlob struct {
@@ -188,6 +190,7 @@ func (h *HormoneBlob) Split() *HormoneBlob {
 }
 
 type ResourcePool struct {
+	sync.RWMutex
 	resources    *ResourceBlob
 	resourceChan chan *ResourceBlob
 	wantChan     chan struct{}
@@ -218,13 +221,16 @@ func (p *ResourcePool) Get(ctx context.Context) *ResourceBlob {
 }
 
 func (p *ResourcePool) Put(r *ResourceBlob) {
-	p.resourceChan <- r
+	p.Lock()
+	p.resources.Add(r)
+	p.Unlock()
 }
 
 func (p *ResourcePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatal("ResourcePool canceled")
 			return
 		case r := <-p.resourceChan:
 			p.resources.Add(r)
@@ -235,6 +241,7 @@ func (p *ResourcePool) Start(ctx context.Context) {
 }
 
 type WastePool struct {
+	sync.RWMutex
 	wastes    *WasteBlob
 	wasteChan chan *WasteBlob
 	wantChan  chan struct{}
@@ -257,13 +264,16 @@ func (p *WastePool) Get(ctx context.Context) *WasteBlob {
 }
 
 func (p *WastePool) Put(r *WasteBlob) {
-	p.wasteChan <- r
+	p.Lock()
+	p.wastes.Add(r)
+	p.Unlock()
 }
 
 func (p *WastePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatal("WastePool canceled")
 			return
 		case r := <-p.wasteChan:
 			p.wastes.Add(r)
@@ -274,6 +284,7 @@ func (p *WastePool) Start(ctx context.Context) {
 }
 
 type LigandPool struct {
+	sync.RWMutex
 	ligands    *LigandBlob
 	ligandChan chan *LigandBlob
 	wantChan   chan struct{}
@@ -296,13 +307,16 @@ func (p *LigandPool) Get(ctx context.Context) *LigandBlob {
 }
 
 func (p *LigandPool) Put(r *LigandBlob) {
-	p.ligandChan <- r
+	p.Lock()
+	p.ligands.Add(r)
+	p.Unlock()
 }
 
 func (p *LigandPool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatal("LigandPool canceled")
 			return
 		case r := <-p.ligandChan:
 			p.ligands.Add(r)
@@ -314,6 +328,7 @@ func (p *LigandPool) Start(ctx context.Context) {
 }
 
 type HormonePool struct {
+	sync.RWMutex
 	hormones    *HormoneBlob
 	hormoneChan chan *HormoneBlob
 	wantChan    chan struct{}
@@ -336,13 +351,16 @@ func (p *HormonePool) Get(ctx context.Context) *HormoneBlob {
 }
 
 func (p *HormonePool) Put(r *HormoneBlob) {
-	p.hormoneChan <- r
+	p.Lock()
+	p.hormones.Add(r)
+	p.Unlock()
 }
 
 func (p *HormonePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatal("HormonePool")
 			return
 		case r := <-p.hormoneChan:
 			p.hormones.Add(r)

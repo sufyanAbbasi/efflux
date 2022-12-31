@@ -58,6 +58,7 @@ type Worker interface {
 	WorkType() WorkType
 	SetOrgan(organ *Node)
 	Work(ctx context.Context, request Work) Work
+	IsApoptosis() bool
 }
 
 type Work struct {
@@ -252,7 +253,7 @@ func ReceiveWork(connection *Connection) (request Work) {
 	data := &WorkSocketData{}
 	err := connection.ReadJSON(data)
 	if err != nil {
-		log.Fatal("Receive: ", err)
+		log.Fatalln("Receive: ", err)
 	}
 	request.workType = WorkType(data.WorkType)
 	request.status = data.Status
@@ -420,15 +421,19 @@ func ConnectNodes(ctx context.Context, node1, node2 *Node, toNode2 EdgeType, toN
 	node2.Connect(ctx, node1.origin, node1.websocketUrl, node1.transportUrl, toNode1)
 }
 
-func (n *Node) MakeAvailable(worker Worker) {
+func (n *Node) MakeAvailable(ctx context.Context, worker Worker) {
 	go func(worker Worker) {
 		m, ok := n.managers.Load(worker.WorkType())
-		if ok {
+		if ok && !worker.IsApoptosis() {
 			manager := m.(*WorkManager)
 			if manager.nextAvailableWorker == nil {
 				manager.nextAvailableWorker = make(chan Worker)
 			}
-			manager.nextAvailableWorker <- worker
+			select {
+			case <-ctx.Done():
+				return
+			case manager.nextAvailableWorker <- worker:
+			}
 		}
 	}(worker)
 }
@@ -462,6 +467,7 @@ func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Conn
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatalln("Node cannot process incoming work")
 			return
 		default:
 			work := ReceiveWork(connection)
@@ -684,7 +690,7 @@ func (n *Node) SendDiffusion(ctx context.Context) {
 			},
 		})
 		if err != nil {
-			log.Fatal("Could not send diffusion data: ", err)
+			log.Fatalln("Could not send diffusion data: ", err)
 		}
 		SendWork(edge.workConnection, Work{
 			workType: diffusion,
@@ -698,6 +704,7 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *Con
 	for {
 		select {
 		case <-ctx.Done():
+			log.Fatalln("Node cannot process work responses")
 			return
 		default:
 			work := ReceiveWork(connection)

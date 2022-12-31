@@ -387,15 +387,22 @@ function getCellColor(id) {
     const match = id.match(getCellType) || []
     switch (match[1]) {
         case 'Bacteria':
+            return 'seagreen';
         case 'Bacteroidota':
-            return 'green';
+            return 'forestgreen';
         case 'Lymphoblast':
         case 'Myeloblast':
+            return 'purple';
         case 'Macrophagocyte':
-        case 'LargeGranularLymphocytes':
+            return 'coral';
+        case 'Neutrophil':
+            return 'yellow';
+        case 'NaturalKiller':
+            return 'orange';
         case 'TLymphocyte':
+            return 'turquoise';
         case 'Dendritic':
-            return 'blue';
+            return 'teal';
         case 'RedBlood':
         case 'Neuron':
         case 'Cardiomyocyte':

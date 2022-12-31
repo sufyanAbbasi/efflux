@@ -19,20 +19,20 @@ const (
 	Bacteroidota          // Bacteria that synthesize vitamins in the gut.
 	RedBlood
 	Neuron
-	Cardiomyocyte            // Heart Cell
-	Pneumocyte               // Pulmonary Cell
-	Myocyte                  // Muscle Cell
-	Keratinocyte             // Skin Cell
-	Enterocyte               // Gut Lining Cell
-	Podocyte                 // Kidney Cell
-	Hemocytoblast            // Bone Marrow Stem Cell, spawns Lymphoblast and Myeloblast
-	Lymphoblast              // Stem Cell, becomes NK, B cells, T cells
-	Myeloblast               // Stem Cell, becomes Neutrophil, Macrophages, and Dendritic cells
-	Macrophagocyte           // Macrophage
-	Neutrocytes              // Neutrophils
-	LargeGranularLymphocytes // Natural Killer Cells
-	TLymphocyte              // T Cell
-	Dendritic                // Dendritic Cells
+	Cardiomyocyte     // Heart Cell
+	Pneumocyte        // Pulmonary Cell
+	Myocyte           // Muscle Cell
+	Keratinocyte      // Skin Cell
+	Enterocyte        // Gut Lining Cell
+	Podocyte          // Kidney Cell
+	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast and Myeloblast
+	Lymphoblast       // Stem Cell, becomes NK, B cells, T cells
+	Myeloblast        // Stem Cell, becomes Neutrophil, Macrophages, and Dendritic cells
+	Macrophagocyte    // Macrophage
+	Neutrocytes       // Neutrophils
+	NaturalKillerCell // Natural Killer Cells
+	TLymphocyte       // T Cell
+	Dendritic         // Dendritic Cells
 )
 
 func (c CellType) String() string {
@@ -64,9 +64,11 @@ func (c CellType) String() string {
 	case Myeloblast:
 		return "Myeloblast"
 	case Macrophagocyte:
-		return "Macrophage"
-	case LargeGranularLymphocytes:
+		return "Macrophagocyte"
+	case Neutrocytes:
 		return "Neutrophil"
+	case NaturalKillerCell:
+		return "NaturalKiller"
 	case TLymphocyte:
 		return "TLymphocyte"
 	case Dendritic:
@@ -376,7 +378,7 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Neutrocytes:
 		fallthrough
-	case LargeGranularLymphocytes:
+	case NaturalKillerCell:
 		fallthrough
 	case TLymphocyte:
 		fallthrough
@@ -436,7 +438,7 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Neutrocytes:
 			fallthrough
-		case LargeGranularLymphocytes:
+		case NaturalKillerCell:
 			fallthrough
 		case TLymphocyte:
 			fallthrough
@@ -816,7 +818,7 @@ func (i *Leukocyte) CanTransport() bool {
 		return false
 	case Neutrocytes:
 		return false
-	case LargeGranularLymphocytes:
+	case NaturalKillerCell:
 		return false
 	case TLymphocyte:
 		return true
@@ -882,7 +884,7 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	switch i.cellType {
 	case Lymphoblast:
 		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, LargeGranularLymphocytes, nothing, string(i.render.id), i.transportPath, i.wantPath)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath)
 
 	case Myeloblast:
 		// Can differentiate into Neutrophil, Macrophage, and Dendritic.
@@ -1438,7 +1440,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				lifeSpan: NEUTROPHIL_LIFE_SPAN,
 			},
 		})
-	case LargeGranularLymphocytes:
+	case NaturalKillerCell:
 		cell = CopyNaturalKiller(&NaturalKiller{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{

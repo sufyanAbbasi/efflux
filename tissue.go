@@ -142,7 +142,7 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 				err := connection.WriteJSON(renderable)
 				if err != nil {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-						fmt.Printf("error: %v", err)
+						fmt.Printf("error: %v %v", err, renderable)
 					} else {
 						fmt.Println("Render socket closed")
 					}
