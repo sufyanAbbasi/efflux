@@ -43,7 +43,6 @@ func (r *Renderable) SetVisible(visible bool) {
 }
 
 type Tissue struct {
-	ctx           context.Context
 	bounds        image.Rectangle
 	streamingChan chan chan RenderableData
 	rootMatrix    *ExtracellularMatrix
@@ -51,7 +50,6 @@ type Tissue struct {
 
 func InitializeTissue(ctx context.Context) *Tissue {
 	tissue := &Tissue{
-		ctx:           ctx,
 		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
 		streamingChan: make(chan chan RenderableData, STREAMING_BUFFER_SIZE),
 	}
@@ -77,8 +75,8 @@ func (t *Tissue) BuildTissue() {
 				targetZ:  0,
 			},
 			attached:         make(map[RenderID]*Renderable),
-			cytokinesMap:     make(map[image.Point]Cytokines),
-			interactionsChan: make(map[image.Point]chan CellActor),
+			cytokinesMap:     &sync.Map{},
+			interactionsChan: &sync.Map{},
 		}
 		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
 		if curr.prev != nil {
@@ -114,7 +112,7 @@ func (t *Tissue) Start(ctx context.Context) {
 	}
 }
 
-func (t *Tissue) Stream(connection *Connection) {
+func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 	fmt.Println("Render socket opened")
 	defer connection.Close()
 	go func(c *Connection) {
@@ -128,7 +126,7 @@ func (t *Tissue) Stream(connection *Connection) {
 	}(connection)
 	for {
 		select {
-		case <-t.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 			err := t.StreamMatrices(connection)
@@ -239,20 +237,14 @@ func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Rende
 	if m == nil {
 		return
 	}
-	m.interactionsMu.Lock()
-	interactionChan, found := m.interactionsChan[r.position]
-	if !found {
-		interactionChan = make(chan CellActor, INTERACTIONS_BUFFER_SIZE)
-		m.interactionsChan[r.position] = interactionChan
-	}
-	m.interactionsMu.Unlock()
+	interactionChan, _ := m.interactionsChan.LoadOrStore(r.position, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
 	ctx, cancel := context.WithTimeout(ctx, BROADCAST_INTERACTION_TIMEOUT_SEC)
 	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case interactionChan <- cell:
+		case interactionChan.(chan CellActor) <- cell:
 		}
 	}
 }
@@ -271,14 +263,8 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 	points := [9]image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
 	var interactionChans [9]chan CellActor
 	for i, pt := range points {
-		m.interactionsMu.Lock()
-		interactionChan, found := m.interactionsChan[pt]
-		if !found {
-			interactionChan = make(chan CellActor, INTERACTIONS_BUFFER_SIZE)
-			m.interactionsChan[pt] = interactionChan
-		}
-		m.interactionsMu.Unlock()
-		interactionChans[i] = interactionChan
+		interactionChan, _ := m.interactionsChan.LoadOrStore(pt, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
+		interactionChans[i] = interactionChan.(chan CellActor)
 	}
 	ctx, cancel := context.WithTimeout(ctx, INTERACTION_TIMEOUT_SEC)
 	defer cancel()
@@ -287,58 +273,69 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 		case <-ctx.Done():
 			return
 		case cell := <-interactionChans[0]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[1]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[2]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[3]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[4]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[5]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[6]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[7]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		case cell := <-interactionChans[8]:
-			interactions = append(interactions, cell)
+			if !cell.IsApoptosis() {
+				interactions = append(interactions, cell)
+			}
 		}
 	}
 }
 
 type Walls struct {
-	sync.RWMutex
 	mainStage     Circle
 	boundaries    []image.Rectangle
 	bubbles       []Circle
 	bridges       []Line
-	inBoundsCache map[image.Point]bool
+	inBoundsCache *sync.Map
 }
 
 func (w *Walls) InBounds(pt image.Point) bool {
-	w.RLock()
-	inBounds, hasPoint := w.inBoundsCache[pt]
-	w.RUnlock()
+	i, hasPoint := w.inBoundsCache.Load(pt)
 	if hasPoint {
-		return inBounds
+		return i.(bool)
 	}
 	if w.mainStage.InBounds(pt) {
-		w.Lock()
-		w.inBoundsCache[pt] = true
-		w.Unlock()
+		w.inBoundsCache.Store(pt, true)
 		return true
 	}
 	for _, b := range w.bridges {
 		if b.InBounds(pt) {
-			w.Lock()
-			w.inBoundsCache[pt] = true
-			w.Unlock()
+			w.inBoundsCache.Store(pt, true)
 			return true
 		}
 	}
-	inBounds = false
+	inBounds := false
 	for _, b := range w.boundaries {
 		if pt.In(b) {
 			inBounds = true
@@ -351,9 +348,7 @@ func (w *Walls) InBounds(pt image.Point) bool {
 			}
 		}
 	}
-	w.Lock()
-	w.inBoundsCache[pt] = inBounds
-	w.Unlock()
+	w.inBoundsCache.Store(pt, inBounds)
 	return inBounds
 }
 
@@ -366,10 +361,8 @@ type ExtracellularMatrix struct {
 	walls            *Walls
 	attached         map[RenderID]*Renderable
 	render           *Renderable
-	cytokinesMap     map[image.Point]Cytokines
-	cytokineMu       sync.RWMutex
-	interactionsChan map[image.Point]chan CellActor
-	interactionsMu   sync.RWMutex
+	cytokinesMap     *sync.Map
+	interactionsChan *sync.Map
 }
 
 func (m *ExtracellularMatrix) ColorModel() color.Model {
@@ -383,28 +376,50 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	pt := image.Point{x, y}
 	if m.walls.InBounds(pt) {
-		pts := []image.Point{pt}
-		cellDamageConcentration := m.GetCytokineContentrations(pts, cell_damage)[0]
-		chemotaxisConcentration := m.GetCytokineContentrations(pts, induce_chemotaxis)[0]
+		return m.GetCytokineColor(pt)
+	}
+	return color.Black
+}
 
-		if chemotaxisConcentration > 0 && cellDamageConcentration > 0 {
-			// Randomly pick one or the other to show.
-			if rand.Intn(2) == 0 {
-				return color.RGBA{math.MaxUint8, math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8}
-			} else {
-				return color.RGBA{math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8, math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8}
+func (m *ExtracellularMatrix) GetCytokineColor(pt image.Point) color.Color {
+	cTypes := []CytokineType{
+		cell_damage,
+		antigen_present,
+		induce_chemotaxis,
+		cytotoxins,
+	}
+	concentrations := m.GetCytokineContentrations([]image.Point{pt}, cTypes)[0]
+	var hues []float64
+	concentration := 0
+	for i, t := range cTypes {
+		concentration += int(concentrations[i])
+		if concentration > 0 {
+			var h float64
+			switch t {
+			case cell_damage:
+				// Red.
+				h = 0
+			case antigen_present:
+				// Orange.
+				h = float64(25) / float64(360)
+			case induce_chemotaxis:
+				// Green.
+				h = float64(125) / float64(360)
+			case cytotoxins:
+				// Pink.
+				h = float64(300) / float64(360)
 			}
+			hues = append(hues, h)
 		}
-		if cellDamageConcentration > 0 {
-			return color.RGBA{math.MaxUint8, math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8 - uint8(cellDamageConcentration), math.MaxUint8}
-		}
-		if chemotaxisConcentration > 0 {
-			return color.RGBA{math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8, math.MaxUint8 - uint8(chemotaxisConcentration), math.MaxUint8}
-		}
+	}
+	if len(hues) > 0 {
+		l := 1 - 0.5*float64(concentration)/float64(math.MaxInt8)
+		h := hues[rand.Intn(len(hues))]
+		r, g, b := HSLtoRGB(h, 1, l)
+		return color.RGBA{r, g, b, math.MaxUint8}
+	} else {
 		return color.White
 	}
-
-	return color.Black
 }
 
 func (m *ExtracellularMatrix) RenderMetadata() string {
@@ -538,22 +553,22 @@ func (m *ExtracellularMatrix) Detach(r *Renderable) {
 }
 
 func (m *ExtracellularMatrix) Tick() {
-	m.cytokineMu.RLock()
-	for _, cytokines := range m.cytokinesMap {
-		for _, c := range cytokines {
-			c.Tick()
-		}
-	}
-	m.cytokineMu.RUnlock()
+	m.cytokinesMap.Range(func(_, cytokines any) bool {
+		cytokines.(*sync.Map).Range(func(_, c any) bool {
+			c.(*Cytokine).Tick()
+			return true
+		})
+		return true
+	})
 	m.RLock()
 	var renderables []*Renderable
 	for _, r := range m.attached {
 		renderables = append(renderables, r)
 	}
+	m.RUnlock()
 	for _, r := range renderables {
 		m.Physics(r)
 	}
-	m.RUnlock()
 }
 
 func (m *ExtracellularMatrix) Render(renderChan chan RenderableData) {
@@ -588,62 +603,55 @@ func (m *ExtracellularMatrix) GetOpenSpaces(pts []image.Point) (open []image.Poi
 	return
 }
 
-func (m *ExtracellularMatrix) GetCytokineContentrations(pts []image.Point, t CytokineType) (concentrations []uint8) {
-	m.cytokineMu.RLock()
-	defer m.cytokineMu.RUnlock()
+func (m *ExtracellularMatrix) GetCytokineContentrations(pts []image.Point, types []CytokineType) (concentrations [][]uint8) {
 	for i := len(pts); i > 0; i-- {
-		concentrations = append(concentrations, 0)
+		concentrations = append(concentrations, make([]uint8, len(types)))
 	}
-	for _, cytokines := range m.cytokinesMap {
-		c, hasCytokine := cytokines[t]
-		if hasCytokine {
-			for i, pt := range pts {
-				if m.walls.InBounds(pt) {
-					concentration := int(concentrations[i]) + int(c.At(pt))
-					if concentration > math.MaxUint8 {
-						concentrations[i] = math.MaxUint8
-					} else {
-						concentrations[i] = uint8(concentration)
+	m.cytokinesMap.Range(func(_, cytokines any) bool {
+		for j, t := range types {
+			c, hasCytokine := cytokines.(*sync.Map).Load(t)
+			if hasCytokine {
+				cytokine := c.(*Cytokine)
+				for i, pt := range pts {
+					if m.walls.InBounds(pt) {
+						cn := concentrations[i]
+						concentration := int(cn[j]) + int(cytokine.At(pt))
+						if concentration > math.MaxUint8 {
+							cn[j] = math.MaxUint8
+						} else {
+							cn[j] = uint8(concentration)
+						}
 					}
 				}
 			}
 		}
-	}
+		return true
+	})
 	return
 }
 
-func (m *ExtracellularMatrix) GetCytokinesAtPoint(pt image.Point) Cytokines {
-	m.cytokineMu.Lock()
-	defer m.cytokineMu.Unlock()
-	cytokines, hasPoint := m.cytokinesMap[pt]
-	if !hasPoint {
-		cytokines = make(map[CytokineType]*Cytokine)
-		m.cytokinesMap[pt] = cytokines
-	}
-	return cytokines
+func (m *ExtracellularMatrix) GetCytokinesAtPoint(pt image.Point) *sync.Map {
+	cytokines, _ := m.cytokinesMap.LoadOrStore(pt, &sync.Map{})
+	return cytokines.(*sync.Map)
 }
 
 func (m *ExtracellularMatrix) AddCytokine(pt image.Point, t CytokineType, concentration uint8) uint8 {
 	cytokines := m.GetCytokinesAtPoint(pt)
-	m.cytokineMu.Lock()
-	c, hasCytokine := cytokines[t]
-	if !hasCytokine {
-		c = MakeCytokine(pt, t, concentration)
-		cytokines[t] = c
-	}
-	m.cytokineMu.Unlock()
-	return c.Add(concentration)
+	c, _ := cytokines.LoadOrStore(t, MakeCytokine(pt, t, concentration))
+	return c.(*Cytokine).Add(concentration)
 }
 
 func (m *ExtracellularMatrix) GetCytokinesWithinRange(pt image.Point, t CytokineType) (cytokinesInRange []*Cytokine) {
-	m.cytokineMu.RLock()
-	defer m.cytokineMu.RUnlock()
-	for _, cytokines := range m.cytokinesMap {
-		c, hasCytokine := cytokines[t]
-		if hasCytokine && c.InBounds(pt) {
-			cytokinesInRange = append(cytokinesInRange, c)
+	m.cytokinesMap.Range(func(_, cytokines any) bool {
+		c, hasCytokine := cytokines.(*sync.Map).Load(t)
+		if hasCytokine {
+			cytokine := c.(*Cytokine)
+			if cytokine.InBounds(pt) {
+				cytokinesInRange = append(cytokinesInRange, cytokine)
+			}
 		}
-	}
+		return true
+	})
 	return
 }
 
@@ -706,6 +714,6 @@ func (m *ExtracellularMatrix) GenerateWalls(numLines int, numBoxesPerLine int) *
 		boundaries:    finalBoundaries,
 		bubbles:       bubbles,
 		bridges:       bridges,
-		inBoundsCache: make(map[image.Point]bool),
+		inBoundsCache: &sync.Map{},
 	}
 }

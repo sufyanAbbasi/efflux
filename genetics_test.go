@@ -6,7 +6,7 @@ import (
 
 func TestCellVerification(t *testing.T) {
 	bacteriaDNA := MakeDNA(BACTERIA_DNA, "E. Coli")
-	bacteria := MakeProkaryoticCell(bacteriaDNA, Bacterial)
+	bacteria := MakeProkaryoticCell(bacteriaDNA, Bacteria)
 
 	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
 	virus := MakeVirus(virusRNA, nil, Pneumocyte)

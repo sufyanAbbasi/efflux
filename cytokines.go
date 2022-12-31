@@ -8,12 +8,12 @@ import (
 )
 
 type CytokineType int
-type Cytokines map[CytokineType]*Cytokine
 
 const (
 	cell_damage CytokineType = iota
 	antigen_present
 	induce_chemotaxis
+	cytotoxins
 )
 
 func Gaussian(sigma, x float64) float64 {
@@ -89,9 +89,7 @@ func (c *Cytokine) Tick() {
 }
 
 func (c *Cytokine) At(pt image.Point) uint8 {
-	c.RLock()
 	concentration := c.concentration
-	c.RUnlock()
 	if c.InBounds(pt) {
 		return uint8(math.Floor(float64(concentration) *
 			math.Exp(-0.5*math.Pow(float64(c.Distance(pt)), 2)/math.Pow(float64(c.radius)/5, 2))))

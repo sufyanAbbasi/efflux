@@ -1,5 +1,9 @@
 package main
 
+import (
+	"context"
+)
+
 type ResourceBlob struct {
 	o2       int
 	glucose  int
@@ -151,34 +155,34 @@ func (l *LigandBlob) Split() *LigandBlob {
 }
 
 type HormoneBlob struct {
-	colony_stimulating_factor            int
-	macrophage_colony_stimulating_factor int
+	granulocyte_csf int
+	macrophage_csf  int
 }
 
 type HormoneBlobData struct {
-	ColonyStimulatingFactor           int
-	MacrophageColonyStimulatingFactor int
+	GranulocyteColonyStimulatingFactor int
+	MacrophageColonyStimulatingFactor  int
 }
 
 func (h *HormoneBlob) Add(hormone *HormoneBlob) {
-	h.colony_stimulating_factor += hormone.colony_stimulating_factor
-	h.macrophage_colony_stimulating_factor += hormone.macrophage_colony_stimulating_factor
+	h.granulocyte_csf += hormone.granulocyte_csf
+	h.macrophage_csf += hormone.macrophage_csf
 }
 
 func (h *HormoneBlob) Split() *HormoneBlob {
 	keep := &HormoneBlob{
-		colony_stimulating_factor:            0,
-		macrophage_colony_stimulating_factor: 0,
+		granulocyte_csf: 0,
+		macrophage_csf:  0,
 	}
-	if h.colony_stimulating_factor > 1 {
-		offset := offset(h.colony_stimulating_factor)
-		h.colony_stimulating_factor /= 2
-		keep.colony_stimulating_factor += h.colony_stimulating_factor + offset
+	if h.granulocyte_csf > 1 {
+		offset := offset(h.granulocyte_csf)
+		h.granulocyte_csf /= 2
+		keep.granulocyte_csf += h.granulocyte_csf + offset
 	}
-	if h.macrophage_colony_stimulating_factor > 1 {
-		offset := offset(h.macrophage_colony_stimulating_factor)
-		h.macrophage_colony_stimulating_factor /= 2
-		keep.macrophage_colony_stimulating_factor += h.macrophage_colony_stimulating_factor + offset
+	if h.macrophage_csf > 1 {
+		offset := offset(h.macrophage_csf)
+		h.macrophage_csf /= 2
+		keep.macrophage_csf += h.macrophage_csf + offset
 	}
 	return keep
 }
@@ -189,18 +193,39 @@ type ResourcePool struct {
 	wantChan     chan struct{}
 }
 
-func (p *ResourcePool) Get() *ResourceBlob {
-	p.wantChan <- struct{}{}
-	return <-p.resourceChan
+func (p *ResourcePool) Check() *ResourceBlob {
+	return &ResourceBlob{
+		o2:       p.resources.o2,
+		glucose:  p.resources.glucose,
+		vitamins: p.resources.vitamins,
+	}
+}
+
+func (p *ResourcePool) Get(ctx context.Context) *ResourceBlob {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		return &ResourceBlob{}
+	case p.wantChan <- struct{}{}:
+		select {
+		case <-ctx.Done():
+			return &ResourceBlob{}
+		case blob := <-p.resourceChan:
+			return blob
+		}
+	}
 }
 
 func (p *ResourcePool) Put(r *ResourceBlob) {
 	p.resourceChan <- r
 }
 
-func (p *ResourcePool) Start() {
+func (p *ResourcePool) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case r := <-p.resourceChan:
 			p.resources.Add(r)
 		case <-p.wantChan:
@@ -215,18 +240,31 @@ type WastePool struct {
 	wantChan  chan struct{}
 }
 
-func (p *WastePool) Get() *WasteBlob {
-	p.wantChan <- struct{}{}
-	return <-p.wasteChan
+func (p *WastePool) Get(ctx context.Context) *WasteBlob {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		return &WasteBlob{}
+	case p.wantChan <- struct{}{}:
+		select {
+		case <-ctx.Done():
+			return &WasteBlob{}
+		case blob := <-p.wasteChan:
+			return blob
+		}
+	}
 }
 
 func (p *WastePool) Put(r *WasteBlob) {
 	p.wasteChan <- r
 }
 
-func (p *WastePool) Start() {
+func (p *WastePool) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case r := <-p.wasteChan:
 			p.wastes.Add(r)
 		case <-p.wantChan:
@@ -241,18 +279,31 @@ type LigandPool struct {
 	wantChan   chan struct{}
 }
 
-func (p *LigandPool) Get() *LigandBlob {
-	p.wantChan <- struct{}{}
-	return <-p.ligandChan
+func (p *LigandPool) Get(ctx context.Context) *LigandBlob {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		return &LigandBlob{}
+	case p.wantChan <- struct{}{}:
+		select {
+		case <-ctx.Done():
+			return &LigandBlob{}
+		case blob := <-p.ligandChan:
+			return blob
+		}
+	}
 }
 
 func (p *LigandPool) Put(r *LigandBlob) {
 	p.ligandChan <- r
 }
 
-func (p *LigandPool) Start() {
+func (p *LigandPool) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case r := <-p.ligandChan:
 			p.ligands.Add(r)
 		default:
@@ -268,18 +319,31 @@ type HormonePool struct {
 	wantChan    chan struct{}
 }
 
-func (p *HormonePool) Get() *HormoneBlob {
-	p.wantChan <- struct{}{}
-	return <-p.hormoneChan
+func (p *HormonePool) Get(ctx context.Context) *HormoneBlob {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		return &HormoneBlob{}
+	case p.wantChan <- struct{}{}:
+		select {
+		case <-ctx.Done():
+			return &HormoneBlob{}
+		case blob := <-p.hormoneChan:
+			return blob
+		}
+	}
 }
 
 func (p *HormonePool) Put(r *HormoneBlob) {
 	p.hormoneChan <- r
 }
 
-func (p *HormonePool) Start() {
+func (p *HormonePool) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case r := <-p.hormoneChan:
 			p.hormones.Add(r)
 		default:
@@ -296,7 +360,7 @@ type MaterialPool struct {
 	hormonePool  *HormonePool
 }
 
-func InitializeMaterialPool() *MaterialPool {
+func InitializeMaterialPool(ctx context.Context) *MaterialPool {
 	m := &MaterialPool{
 		resourcePool: &ResourcePool{
 			resources: &ResourceBlob{
@@ -324,26 +388,26 @@ func InitializeMaterialPool() *MaterialPool {
 		},
 		hormonePool: &HormonePool{
 			hormones: &HormoneBlob{
-				colony_stimulating_factor:            SEED_COLONY_STIMULATING_FACTOR,
-				macrophage_colony_stimulating_factor: SEED_MACROPHAGE_COLONY_STIMULATING_FACTOR,
+				granulocyte_csf: SEED_GRANULOCYTE_COLONY_STIMULATING_FACTOR,
+				macrophage_csf:  SEED_MACROPHAGE_COLONY_STIMULATING_FACTOR,
 			},
 			hormoneChan: make(chan *HormoneBlob, POOL_SIZE),
 			wantChan:    make(chan struct{}, POOL_SIZE),
 		},
 	}
-	go m.resourcePool.Start()
-	go m.wastePool.Start()
-	go m.ligandPool.Start()
-	go m.hormonePool.Start()
+	go m.resourcePool.Start(ctx)
+	go m.wastePool.Start(ctx)
+	go m.ligandPool.Start(ctx)
+	go m.hormonePool.Start(ctx)
 	return m
 }
 
-func (m *MaterialPool) GetResource() *ResourceBlob {
-	return m.resourcePool.Get()
+func (m *MaterialPool) GetResource(ctx context.Context) *ResourceBlob {
+	return m.resourcePool.Get(ctx)
 }
 
-func (m *MaterialPool) SplitResource() *ResourceBlob {
-	blob := m.resourcePool.Get()
+func (m *MaterialPool) SplitResource(ctx context.Context) *ResourceBlob {
+	blob := m.resourcePool.Get(ctx)
 	m.PutResource(blob.Split())
 	return blob
 }
@@ -352,12 +416,12 @@ func (m *MaterialPool) PutResource(r *ResourceBlob) {
 	m.resourcePool.Put(r)
 }
 
-func (m *MaterialPool) GetWaste() *WasteBlob {
-	return m.wastePool.Get()
+func (m *MaterialPool) GetWaste(ctx context.Context) *WasteBlob {
+	return m.wastePool.Get(ctx)
 }
 
-func (m *MaterialPool) SplitWaste() *WasteBlob {
-	blob := m.wastePool.Get()
+func (m *MaterialPool) SplitWaste(ctx context.Context) *WasteBlob {
+	blob := m.wastePool.Get(ctx)
 	m.PutWaste(blob.Split())
 	return blob
 }
@@ -366,20 +430,20 @@ func (m *MaterialPool) PutWaste(w *WasteBlob) {
 	m.wastePool.Put(w)
 }
 
-func (m *MaterialPool) GetLigand() *LigandBlob {
-	return m.ligandPool.Get()
+func (m *MaterialPool) GetLigand(ctx context.Context) *LigandBlob {
+	return m.ligandPool.Get(ctx)
 }
 
 func (m *MaterialPool) PutLigand(l *LigandBlob) {
 	m.ligandPool.Put(l)
 }
 
-func (m *MaterialPool) GetHormone() *HormoneBlob {
-	return m.hormonePool.Get()
+func (m *MaterialPool) GetHormone(ctx context.Context) *HormoneBlob {
+	return m.hormonePool.Get(ctx)
 }
 
-func (m *MaterialPool) SplitHormone() *HormoneBlob {
-	blob := m.hormonePool.Get()
+func (m *MaterialPool) SplitHormone(ctx context.Context) *HormoneBlob {
+	blob := m.hormonePool.Get(ctx)
 	m.PutHormone(blob.Split())
 	return blob
 }

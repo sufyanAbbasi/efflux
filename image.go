@@ -199,3 +199,44 @@ func ManhattanDistance(p0, p1 image.Point) int {
 	}
 	return dx + dy
 }
+
+func HuetoRGB(p, q, h float64) uint8 {
+	if h < 0 {
+		h += 1
+	}
+	if h > 1 {
+		h -= 1
+	}
+	if h < float64(1)/float64(6) {
+		return uint8(math.Round(float64(math.MaxUint8)*p + (q-p)*float64(6)*h))
+	}
+	if h < float64(1)/float64(2) {
+		return uint8(math.Round(float64(math.MaxUint8) * q))
+	}
+	if h < float64(2)/float64(3) {
+		return uint8(math.Round(float64(math.MaxUint8)*p + (q-p)*(float64(2)/float64(3)-h)*float64(6)))
+	}
+	return uint8(math.Round(float64(math.MaxUint8) * p))
+}
+
+func HSLtoRGB(h, s, l float64) (r, g, b uint8) {
+	if s == 0 {
+		// Achromatic
+		r = uint8(math.Round(float64(l) * float64(math.MaxUint8)))
+		g = r
+		b = r
+	} else {
+		var q float64
+		if l < 0.5 {
+			l = 0.5
+			q = l * (1 + s)
+		} else {
+			q = l + s - l*s
+		}
+		p := float64(2)*l - q
+		r = HuetoRGB(p, q, h+(float64(1)/float64(3)))
+		g = HuetoRGB(p, q, h)
+		b = HuetoRGB(p, q, h-(float64(1)/float64(3)))
+	}
+	return
+}

@@ -11,11 +11,14 @@ import (
 	"log"
 )
 
-var HUMAN_DNA = elliptic.P521()
-var BACTERIA_DNA = elliptic.P384()
-var VIRUS_RNA = elliptic.P224()
-
 type DNAType elliptic.Curve
+type MollecularPattern string
+
+var HUMAN_DNA = DNAType(elliptic.P521())
+var BACTERIA_DNA = DNAType(elliptic.P384())
+var VIRUS_RNA = DNAType(elliptic.P224())
+
+var BACTERIA_MOLECULAR_MOTIF = MollecularPattern("3940200619")
 
 var DNATypeMap = map[int]DNAType{
 	521: HUMAN_DNA,
@@ -35,8 +38,9 @@ type Protein uint16
 type AntigenSignature []byte
 
 type Antigen struct {
-	proteins  []Protein
-	signature AntigenSignature
+	proteins           []Protein
+	signature          AntigenSignature
+	mollecular_pattern MollecularPattern
 }
 
 func MakeDNA(dnaType DNAType, name string) *DNA {
@@ -116,15 +120,21 @@ func (d *DNA) GenerateSelfProteins() map[Protein]bool {
 	return selfProteins
 }
 
+func (d *DNA) GetMolecularMotif() MollecularPattern {
+	return MollecularPattern(d.dnaType.Params().P.String()[0:10])
+}
+
 func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
 	hash := HashProteins(proteins)
 	signature, err := ecdsa.SignASN1(rand.Reader, d.base, hash[:])
 	if err != nil {
 		log.Fatal(err)
 	}
+	mollecular_pattern := d.GetMolecularMotif()
 	return &Antigen{
-		proteins:  proteins,
-		signature: signature,
+		proteins:           proteins,
+		signature:          signature,
+		mollecular_pattern: mollecular_pattern,
 	}
 }
 

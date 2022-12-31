@@ -15,7 +15,7 @@ import (
 type CellType int
 
 const (
-	Bacterial    CellType = iota
+	Bacteria     CellType = iota
 	Bacteroidota          // Bacteria that synthesize vitamins in the gut.
 	RedBlood
 	Neuron
@@ -37,8 +37,8 @@ const (
 
 func (c CellType) String() string {
 	switch c {
-	case Bacterial:
-		return "Bacterial"
+	case Bacteria:
+		return "Bacteria"
 	case Bacteroidota:
 		return "Bacteroidota"
 	case RedBlood:
@@ -84,6 +84,7 @@ type CellActor interface {
 	CleanUp()
 	Stop()
 	Organ() *Node
+	Verbose() bool
 	Tissue() *Tissue
 	DoesWork() bool
 	Position() image.Point
@@ -91,26 +92,29 @@ type CellActor interface {
 	BroadcastPosition(ctx context.Context)
 	SpawnTime() time.Time
 	Function() *StateDiagram
-	WillMitosis() bool
+	WillMitosis(context.Context) bool
 	Mitosis(ctx context.Context) bool
 	CollectResources(context.Context) bool
 	ProduceWaste()
 	Damage() int
 	Repair(int)
+	ShouldIncurDamage(context.Context) bool
 	IncurDamage(int)
 	Apoptosis()
+	IsApoptosis() bool
 	IsAerobic() bool
 	IsOxygenated() bool
 	Oxygenate(bool)
 	CanMove() bool
 	Move(dx, dy, dz int)
 	MoveToPoint(pt image.Point)
-	MoveTowardsCytokine(CytokineType) bool
-	MoveAwayFromCytokine(CytokineType) bool
+	MoveTowardsCytokines([]CytokineType) bool
+	MoveAwayFromCytokines([]CytokineType) bool
 	CanInteract() bool
 	GetInteractions(ctx context.Context) (interactions []CellActor)
+	Interact(ctx context.Context, c CellActor)
 	CanTransport() bool
-	ShouldTransport() bool
+	ShouldTransport(context.Context) bool
 	Transport() bool
 	RecordTransport()
 }
@@ -150,12 +154,18 @@ func (c *Cell) Organ() *Node {
 	return c.organ
 }
 
+func (c *Cell) Verbose() bool {
+	return c.organ != nil && c.organ.verbose
+}
+
 func (c *Cell) SetOrgan(node *Node) {
 	c.organ = node
 }
 
 func (c *Cell) Tissue() *Tissue {
-	if c.organ == nil || c.organ.tissue == nil || c.organ.tissue.rootMatrix == nil {
+	if c.organ == nil ||
+		c.organ.tissue == nil ||
+		c.organ.tissue.rootMatrix == nil {
 		return nil
 	}
 	return c.organ.tissue
@@ -199,24 +209,47 @@ func (c *Cell) Repair(damage int) {
 	} else {
 		c.damage -= damage
 	}
-	fmt.Println("Repaired:", c)
+	if c.Verbose() {
+		fmt.Println("Repaired:", c)
+	}
+}
+
+func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
+	waste := c.Organ().materialPool.GetWaste(ctx)
+	c.Organ().materialPool.PutWaste(waste)
+	return waste.creatinine >= DAMAGE_CREATININE_THRESHOLD ||
+		waste.co2 >= DAMAGE_CO2_THRESHOLD ||
+		c.GetCytokineConcentrationAt(cytotoxins, c.Position()) > 0
 }
 
 func (c *Cell) IncurDamage(damage int) {
 	c.damage += int(damage)
-	fmt.Println("Damaged:", c, "in", c.organ)
+	if c.Verbose() {
+		fmt.Println("Damaged:", c, "- damage", c.damage, "in", c.organ)
+	}
 }
 
 func (c *Cell) CleanUp() {
 	c.render.visible = false
-	c.organ.tissue.Detach(c.render)
+	if c.organ != nil && c.organ.tissue != nil {
+		c.organ.tissue.Detach(c.render)
+	}
 	c.Stop()
-	fmt.Println("Despawned:", c, "in", c.organ)
+	if c.Verbose() {
+		fmt.Println("Despawned:", c, "in", c.organ)
+	}
 	c.organ = nil
 }
 
 func (c *Cell) Apoptosis() {
+	if c.Verbose() {
+		fmt.Println("Apoptosis:", c, "in", c.organ)
+	}
 	c.CleanUp()
+}
+
+func (c *Cell) IsApoptosis() bool {
+	return c.Tissue() == nil
 }
 
 func (c *Cell) Work(ctx context.Context, request Work) Work {
@@ -224,13 +257,11 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		log.Fatalf("Cell %v is unable to perform work: %v", c, request)
 	}
 	if c.organ.materialPool != nil && !c.CollectResources(ctx) {
-		if c.cellType != RedBlood {
-			if c.resourceNeed.glucose > 0 {
-				fmt.Println("Not enough glucose:", c, "in", c.organ)
-			}
-			if c.resourceNeed.o2 > 0 {
-				fmt.Println("Not enough oxygen:", c, "in", c.organ)
-			}
+		if c.resourceNeed.glucose > 0 && c.Verbose() {
+			fmt.Println("Not enough glucose:", c, "in", c.organ)
+		}
+		if c.resourceNeed.o2 > 0 && c.Verbose() {
+			fmt.Println("Not enough oxygen:", c, "in", c.organ)
 		}
 		request.status = 503
 		request.result = "Not enough resources."
@@ -239,16 +270,16 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	c.Lock()
 	switch c.cellType {
 	case RedBlood:
-		waste := c.organ.materialPool.GetWaste()
-		waste.co2 += CELLULAR_TRANSPORT_CO2
-		c.organ.materialPool.PutWaste(waste)
+		c.organ.materialPool.PutWaste(&WasteBlob{
+			co2: CELLULAR_TRANSPORT_CO2,
+		})
 	case Enterocyte:
-		resource := c.organ.materialPool.GetResource()
-		resource.glucose += GLUCOSE_INTAKE
-		resource.vitamins += VITAMIN_INTAKE
-		c.organ.materialPool.PutResource(resource)
+		c.organ.materialPool.PutResource(&ResourceBlob{
+			glucose:  GLUCOSE_INTAKE,
+			vitamins: VITAMIN_INTAKE,
+		})
 	case Podocyte:
-		waste := c.organ.materialPool.GetWaste()
+		waste := c.organ.materialPool.GetWaste(ctx)
 		if waste.creatinine <= CREATININE_FILTRATE {
 			waste.creatinine = 0
 		} else {
@@ -256,24 +287,24 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		}
 		c.organ.materialPool.PutWaste(waste)
 	case Pneumocyte:
-		waste := c.organ.materialPool.GetWaste()
+		waste := c.organ.materialPool.GetWaste(ctx)
 		if waste.co2 <= CELLULAR_TRANSPORT_CO2 {
 			waste.co2 = 0
 		} else {
 			waste.co2 -= CELLULAR_TRANSPORT_CO2
 		}
 		c.organ.materialPool.PutWaste(waste)
-		resource := c.organ.materialPool.GetResource()
-		resource.o2 += LUNG_O2_INTAKE
-		c.organ.materialPool.PutResource(resource)
+		c.organ.materialPool.PutResource(&ResourceBlob{
+			o2: LUNG_O2_INTAKE,
+		})
 	case Cardiomyocyte:
-		request := c.organ.RequestWork(Work{
+		request := c.organ.RequestWork(ctx, Work{
 			workType: exhale,
 		})
 		if request.status == 200 {
-			resource := c.organ.materialPool.GetResource()
-			resource.o2 += CELLULAR_TRANSPORT_O2
-			c.organ.materialPool.PutResource(resource)
+			c.organ.materialPool.PutResource(&ResourceBlob{
+				o2: CELLULAR_TRANSPORT_O2,
+			})
 		}
 	case Myocyte:
 		fallthrough
@@ -305,15 +336,20 @@ func (c *Cell) PresentAntigen(reset bool) *Antigen {
 }
 
 func (c *Cell) CollectResources(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
+	defer cancel()
 	if c.resourceNeed == nil {
 		c.ResetResourceNeed()
 	}
 	for !reflect.DeepEqual(c.resourceNeed, new(ResourceBlob)) {
 		select {
 		case <-ctx.Done():
+			if c.Verbose() {
+				fmt.Println(c, "resource collection timeout in", c.organ)
+			}
 			return false
 		default:
-			resource := c.organ.materialPool.GetResource()
+			resource := c.organ.materialPool.GetResource(ctx)
 			resource.Consume(c.resourceNeed)
 			c.organ.materialPool.PutResource(resource)
 		}
@@ -359,11 +395,10 @@ func (c *Cell) ResetResourceNeed() {
 			o2:      CELLULAR_TRANSPORT_O2,
 			glucose: CELLULAR_TRANSPORT_GLUCOSE,
 		}
+	case Bacteria:
+		fallthrough
 	case Bacteroidota:
-		c.resourceNeed = &ResourceBlob{
-			o2:      CELLULAR_RESPIRATION_O2,
-			glucose: CELLULAR_RESPIRATION_GLUCOSE,
-		}
+		fallthrough
 	case Neuron:
 		fallthrough
 	case Cardiomyocyte:
@@ -408,12 +443,15 @@ func (c *Cell) ProduceWaste() {
 		case Dendritic:
 			// No waste produced.
 		case Bacteroidota:
-			waste := c.organ.materialPool.GetWaste()
-			waste.co2 += CELLULAR_RESPIRATION_CO2
-			c.organ.materialPool.PutWaste(waste)
-			resource := c.Organ().materialPool.GetResource()
-			resource.vitamins += BACTERIA_VITAMIN_PRODUCTION
-			c.Organ().materialPool.PutResource(resource)
+			c.organ.materialPool.PutWaste(&WasteBlob{
+				co2: CELLULAR_RESPIRATION_CO2,
+			})
+			c.Organ().materialPool.PutResource(&ResourceBlob{
+				vitamins: BACTERIA_VITAMIN_PRODUCTION,
+			})
+		case Bacteria:
+			c.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
+			fallthrough
 		case Cardiomyocyte:
 			fallthrough
 		case Myocyte:
@@ -421,10 +459,10 @@ func (c *Cell) ProduceWaste() {
 		case Neuron:
 			fallthrough
 		default:
-			waste := c.organ.materialPool.GetWaste()
-			waste.creatinine += CREATININE_PRODUCTION
-			waste.co2 += CELLULAR_RESPIRATION_CO2
-			c.organ.materialPool.PutWaste(waste)
+			c.organ.materialPool.PutWaste(&WasteBlob{
+				creatinine: CREATININE_PRODUCTION,
+				co2:        CELLULAR_RESPIRATION_CO2,
+			})
 		}
 	}
 }
@@ -470,7 +508,15 @@ func (c *Cell) MoveToPoint(pt image.Point) {
 	}
 }
 
-func (c *Cell) GetNearestCytokines(t CytokineType) (points []image.Point, concentrations []uint8) {
+func (c *Cell) GetCytokineConcentrationAt(t CytokineType, pt image.Point) uint8 {
+	tissue := c.Tissue()
+	if tissue == nil {
+		return 0
+	}
+	return tissue.rootMatrix.GetCytokineContentrations([]image.Point{pt}, []CytokineType{t})[0][0]
+}
+
+func (c *Cell) GetNearestCytokines(t []CytokineType) (points []image.Point, concentrations [][]uint8) {
 	tissue := c.Tissue()
 	if tissue == nil {
 		return
@@ -486,14 +532,16 @@ func (c *Cell) GetNearestCytokines(t CytokineType) (points []image.Point, concen
 	return
 }
 
-func (c *Cell) MoveTowardsCytokine(t CytokineType) bool {
+func (c *Cell) MoveTowardsCytokines(t []CytokineType) bool {
 	points, concentrations := c.GetNearestCytokines(t)
 	maxIndex := -1
 	maxVal := uint8(0)
-	for i, v := range concentrations {
-		if v > maxVal {
-			maxVal = v
-			maxIndex = i
+	for i, cns := range concentrations {
+		for _, v := range cns {
+			if v > maxVal {
+				maxVal = v
+				maxIndex = i
+			}
 		}
 	}
 	if maxIndex >= 0 {
@@ -502,14 +550,16 @@ func (c *Cell) MoveTowardsCytokine(t CytokineType) bool {
 	return maxIndex >= 0
 }
 
-func (c *Cell) MoveAwayFromCytokine(t CytokineType) bool {
+func (c *Cell) MoveAwayFromCytokines(t []CytokineType) bool {
 	points, concentrations := c.GetNearestCytokines(t)
 	minIndex := -1
 	minVal := uint8(0)
-	for i, v := range concentrations {
-		if v < minVal {
-			minVal = v
-			minIndex = i
+	for i, cns := range concentrations {
+		for _, v := range cns {
+			if v < minVal {
+				minVal = v
+				minIndex = i
+			}
 		}
 	}
 	if minIndex >= 0 {
@@ -530,6 +580,10 @@ func (c *Cell) CanInteract() bool {
 	return false
 }
 
+func (c *Cell) Interact(context.Context, CellActor) {
+	panic("unimplemented")
+}
+
 func (c *Cell) GetInteractions(ctx context.Context) (interactions []CellActor) {
 	tissue := c.Tissue()
 	if tissue == nil {
@@ -543,7 +597,7 @@ func (c *Cell) CanTransport() bool {
 	return false
 }
 
-func (c *Cell) ShouldTransport() bool {
+func (c *Cell) ShouldTransport(context.Context) bool {
 	return false
 }
 
@@ -583,6 +637,16 @@ func (c *Cell) Transport() bool {
 	} else {
 		// Pick a random, valid edge to transport to.
 		edge = transportEdges[rand.Intn(len(transportEdges))]
+		hasBeen := false
+		for i := 0; i < len(c.transportPath) && !hasBeen; i++ {
+			if edge.transportUrl == c.transportPath[i] {
+				hasBeen = true
+			}
+		}
+		if hasBeen {
+			// If we've been to this edge before, reroll.
+			edge = transportEdges[rand.Intn(len(transportEdges))]
+		}
 	}
 	err := MakeTransportRequest(edge.transportUrl, c.dna.name, c.dna, c.cellType, c.workType, string(c.render.id), c.transportPath, c.wantPath)
 	if err != nil {
@@ -655,9 +719,9 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.Cell.IncurDamage(damage)
 	e.DropCytokine(cell_damage, CYTOKINE_CELL_DAMAGE)
-	ligand := e.Organ().materialPool.GetLigand()
-	defer e.Organ().materialPool.PutLigand(ligand)
-	ligand.inflammation += LIGAND_INFLAMMATION_CELL_DAMAGE
+	e.Organ().materialPool.PutLigand(&LigandBlob{
+		inflammation: LIGAND_INFLAMMATION_CELL_DAMAGE,
+	})
 }
 
 func (e *EukaryoticCell) CleanUp() {
@@ -668,23 +732,23 @@ func (e *EukaryoticCell) CleanUp() {
 	// TODO: make sure this gets garbage collected.
 }
 
-func (e *EukaryoticCell) WillMitosis() bool {
+func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 	switch e.cellType {
 	case Hemocytoblast:
 		// Bootstrap the mitosis function to spawn leukocyte stem cells, but only in the present of the hormone.
-		hormone := e.organ.materialPool.GetHormone()
-		if hormone.colony_stimulating_factor >= HORMONE_CSF_THRESHOLD {
-			hormone.colony_stimulating_factor -= HORMONE_CSF_THRESHOLD
+		hormone := e.organ.materialPool.GetHormone(ctx)
+		if hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD {
+			hormone.granulocyte_csf -= HORMONE_CSF_THRESHOLD
 			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
-		if hormone.macrophage_colony_stimulating_factor >= HORMONE_M_CSF_THRESHOLD {
-			hormone.macrophage_colony_stimulating_factor -= HORMONE_M_CSF_THRESHOLD
+		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
+			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
 			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
 		e.organ.materialPool.PutHormone(hormone)
-		return hormone.colony_stimulating_factor >= HORMONE_CSF_THRESHOLD || hormone.macrophage_colony_stimulating_factor >= HORMONE_M_CSF_THRESHOLD
+		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
 	default:
-		ligand := e.Organ().materialPool.GetLigand()
+		ligand := e.Organ().materialPool.GetLigand(ctx)
 		defer e.Organ().materialPool.PutLigand(ligand)
 		if ligand.growth >= LIGAND_GROWTH_THRESHOLD {
 			// Only checked if prior conditions are met.
@@ -763,19 +827,21 @@ func (i *Leukocyte) CanTransport() bool {
 	}
 }
 
-func (i Leukocyte) ShouldTransport() bool {
+func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 	switch i.cellType {
 	case Lymphoblast:
 		fallthrough
 	case Myeloblast:
+		fallthrough
+	case Neutrocytes:
 		// Wait until the lifespan is over before moving on.
 		if time.Now().Before(i.spawnTime.Add(i.lifeSpan)) {
 			return false
 		}
 		// If there is no inflammation, move on.
-		ligand := i.organ.materialPool.GetLigand()
+		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
-		if ligand.inflammation < LIGAND_INFLAMMATION_THRESHOLD {
+		if ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD {
 			return true
 		}
 	}
@@ -785,12 +851,14 @@ func (i Leukocyte) ShouldTransport() bool {
 func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
 	if c.PresentAntigen(false) == nil ||
 		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
-		fmt.Println("KILL:", c)
 		return false
 	} else {
-		fmt.Println("Passes:", c)
 		return true
 	}
+}
+
+func (i *Leukocyte) Trap(c CellActor) {
+	c.MoveToPoint(i.Position())
 }
 
 func (i *Leukocyte) DoesWork() bool {
@@ -802,6 +870,10 @@ func (i *Leukocyte) IsAerobic() bool {
 }
 
 func (i *Leukocyte) CanMove() bool {
+	return true
+}
+
+func (i *Leukocyte) CanInteract() bool {
 	return true
 }
 
@@ -820,22 +892,26 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	return false
 }
 
-func (i *Leukocyte) WillMitosis() bool {
+func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 	// Overloading mitosis with differentiation. Once differentiated, the existing cell will disappear.
 	switch i.cellType {
 	case Lymphoblast:
 		fallthrough
 	case Myeloblast:
 		// If there is no inflammation, don't differentiate.
-		ligand := i.organ.materialPool.GetLigand()
+		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
-		return ligand.inflammation >= LIGAND_INFLAMMATION_THRESHOLD
+		return ligand.inflammation >= LEUKOCYTE_INFLAMMATION_THRESHOLD
 	}
 	return false
 }
 
 type LeukocyteStemCell struct {
 	*Leukocyte
+}
+
+func (l *LeukocyteStemCell) CanInteract() bool {
+	return false
 }
 
 func (l *LeukocyteStemCell) Start(ctx context.Context) {
@@ -878,7 +954,12 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 }
 
 type Neutrophil struct {
+	inNETosis bool
 	*Leukocyte
+}
+
+func (n *Neutrophil) ShouldIncurDamage(ctx context.Context) bool {
+	return n.Cell.ShouldIncurDamage(ctx) && n.inNETosis
 }
 
 func (n *Neutrophil) Start(ctx context.Context) {
@@ -889,6 +970,41 @@ func (n *Neutrophil) Start(ctx context.Context) {
 
 func (n *Neutrophil) BroadcastPosition(ctx context.Context) {
 	n.Tissue().BroadcastPosition(ctx, n, n.render)
+}
+
+func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
+	antigen := c.PresentAntigen(false)
+	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
+		return
+	}
+	// It's bacteria, time to kill.
+	// There are three modes of killing for neutrophils:
+	//  1 - Phagocytosis: If the bacteria is covered opsonins (complements
+	//      bound to parts of the bacteria), then the neutrophil can consume
+	//      it. We won't have complements, so we'll simulate that with by
+	//      checking if the bacteria has been around for some time.
+	//  2 - Degranulations: Release cytotoxic chemicals to cause damage.
+	//  3 - Neutrophil Extracellular Traps: Trap bacteria in a web of innards
+	//      made of DNA and toxins to keep them in place and cause damage.
+	//
+	n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+	n.Organ().materialPool.PutLigand(&LigandBlob{
+		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
+	})
+	if n.GetCytokineConcentrationAt(antigen_present, c.Position()) >= NEUTROPHIL_NETOSIS_THRESHOLD {
+		n.inNETosis = true
+	}
+	if n.inNETosis {
+		n.Trap(c)
+		c.IncurDamage(NEUTROPHIL_NET_DAMAGE)
+	} else if c.SpawnTime().Add(15 * time.Minute).After(time.Now()) {
+		// Enough time has passed that bacteria should be covered in opsonins.
+		// Can perform phagocytosis without NET, which is insta kill.
+		n.Trap(c)
+		c.IncurDamage(MAX_DAMAGE)
+	} else {
+		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
+	}
 }
 
 func CopyNeutrophil(base *Neutrophil) *Neutrophil {
@@ -932,6 +1048,17 @@ func (n *NaturalKiller) Start(ctx context.Context) {
 
 func (n *NaturalKiller) BroadcastPosition(ctx context.Context) {
 	n.Tissue().BroadcastPosition(ctx, n, n.render)
+}
+
+func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
+	antigen := c.PresentAntigen(false)
+	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
+		return
+	}
+	n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+	ligand := n.Organ().materialPool.GetLigand(ctx)
+	defer n.Organ().materialPool.PutLigand(ligand)
+	ligand.inflammation += LIGAND_INFLAMMATION_LEUKOCYTE
 }
 
 func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
@@ -1162,9 +1289,13 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 }
 
 func (p *ProkaryoticCell) Start(ctx context.Context) {
+	tissue := p.Tissue()
+	if tissue == nil {
+		return
+	}
 	p.function = p.dna.makeFunction(p)
 	go p.function.Run(ctx, p)
-	p.Tissue().Attach(p.render)
+	tissue.Attach(p.render)
 }
 
 func (p *ProkaryoticCell) DoesWork() bool {
@@ -1176,10 +1307,14 @@ func (p *ProkaryoticCell) CanTransport() bool {
 }
 
 func (p *ProkaryoticCell) BroadcastPosition(ctx context.Context) {
-	p.Tissue().BroadcastPosition(ctx, p, p.render)
+	tissue := p.Tissue()
+	if tissue == nil {
+		return
+	}
+	tissue.BroadcastPosition(ctx, p, p.render)
 }
 
-func (p *ProkaryoticCell) WillMitosis() bool {
+func (p *ProkaryoticCell) WillMitosis(context.Context) bool {
 	if time.Now().After(p.lastGenerationTime.Add(p.generationTime)) && p.energy >= BACTERIA_ENERGY_MITOSIS_THRESHOLD {
 		p.energy = 0
 		return true
@@ -1242,7 +1377,7 @@ func (v *Virus) InfectCell(c CellActor) {
 func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string) (cell CellActor) {
 	switch cellType {
 	// Bacteria
-	case Bacterial:
+	case Bacteria:
 		fallthrough
 	case Bacteroidota:
 		cell = CopyProkaryoticCell(&ProkaryoticCell{

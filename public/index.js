@@ -140,7 +140,7 @@ class Node {
         labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-        labels.push(`${makePadding('csf: ' + materialStatus.csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)}`);
+        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
     }
@@ -351,13 +351,14 @@ class Render {
         // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
         let el = document.querySelector(`#${id}`);
         if (!el) {
+            const color = getCellColor(id);
             const container = document.createElement('div');
             render(html`
                 <a-sphere
                     id="${id}"
                     class="cell disposable"
                     radius="1"
-                    color="red"
+                    color="${color}"
                     position="${x} ${-y} 0">
                 </a-sphere>
             `, container);
@@ -375,6 +376,38 @@ class Render {
         }
         LastRenderTime.set(id, Date.now());
     }
+}
+
+var getCellType = new RegExp(/([a-z]+)[0-9]+$/i);
+
+function getCellColor(id) {
+    if (!id) {
+        return 'red';
+    }
+    const match = id.match(getCellType) || []
+    switch (match[1]) {
+        case 'Bacteria':
+        case 'Bacteroidota':
+            return 'green';
+        case 'Lymphoblast':
+        case 'Myeloblast':
+        case 'Macrophagocyte':
+        case 'LargeGranularLymphocytes':
+        case 'TLymphocyte':
+        case 'Dendritic':
+            return 'blue';
+        case 'RedBlood':
+        case 'Neuron':
+        case 'Cardiomyocyte':
+        case 'Pneumocyte':
+        case 'Myocyte':
+        case 'Keratinocyte':
+        case 'Enterocyte':
+        case 'Podocyte':
+        case 'Hemocytoblast':
+        default:
+            return 'red';
+        }
 }
 
 function garbageCollector() {

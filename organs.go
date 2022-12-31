@@ -105,7 +105,7 @@ type MaterialStatusData struct {
 	Hunger       int `json:"hunger"`
 	Asphyxia     int `json:"asphyxia"`
 	Inflammation int `json:"inflammation"`
-	CSF          int `json:"csf"`
+	G_CSF        int `json:"g_csf"`
 	M_CSF        int `json:"m_csf"`
 }
 
@@ -185,7 +185,7 @@ func MakeTransportRequest(
 	return nil
 }
 
-func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
+func (n *Node) HandleTransportRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields() // catch unwanted fields
 
@@ -205,8 +205,10 @@ func (n *Node) HandleTransportRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	cell.SetOrgan(n)
 	cell.RecordTransport()
-	fmt.Println("Spawned:", cell, "in", cell.Organ())
-	ctx, stop := context.WithCancel(context.Background())
+	if n.verbose {
+		fmt.Println("Spawned:", cell, "in", cell.Organ())
+	}
+	ctx, stop := context.WithCancel(ctx)
 	cell.SetStop(stop)
 	cell.Start(ctx)
 
@@ -271,7 +273,6 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
-	ctx          context.Context
 	name         string
 	edges        []*Edge
 	serverMux    *http.ServeMux
@@ -279,9 +280,10 @@ type Node struct {
 	port         string
 	websocketUrl string
 	transportUrl string
-	managers     map[WorkType]*WorkManager
+	managers     *sync.Map
 	materialPool *MaterialPool
 	tissue       *Tissue
+	verbose      bool
 }
 
 var currentPort = 7999
@@ -295,19 +297,19 @@ func GetNextAddresses() (string, string, string, string, string) {
 		fmt.Sprintf(TRANSPORT_URL_TEMPLATE, currentPort)
 }
 
-func InitializeNewNode(ctx context.Context, graph *Graph, name string) *Node {
+func InitializeNewNode(ctx context.Context, graph *Graph, name string, verbose bool) *Node {
 	origin, port, url, websocketUrl, transportUrl := GetNextAddresses()
 	node := &Node{
-		ctx:          ctx,
 		name:         name,
 		origin:       origin,
 		port:         port,
 		websocketUrl: websocketUrl,
 		transportUrl: transportUrl,
-		managers:     make(map[WorkType]*WorkManager),
+		managers:     &sync.Map{},
 		tissue:       InitializeTissue(ctx),
+		verbose:      verbose,
 	}
-	node.materialPool = InitializeMaterialPool()
+	node.materialPool = InitializeMaterialPool(ctx)
 	graph.allNodes[url] = node
 	node.Start(ctx)
 	go node.tissue.Start(ctx)
@@ -348,14 +350,14 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func WebsocketHandler(connectionHandler func(connection *Connection)) func(w http.ResponseWriter, r *http.Request) {
+func WebsocketHandler(ctx context.Context, connectionHandler func(context.Context, *Connection)) func(w http.ResponseWriter, r *http.Request) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		connectionHandler(&Connection{
+		connectionHandler(ctx, &Connection{
 			Conn: conn,
 		})
 	}
@@ -364,11 +366,13 @@ func WebsocketHandler(connectionHandler func(connection *Connection)) func(w htt
 
 func (n *Node) Start(ctx context.Context) {
 	n.serverMux = http.NewServeMux()
-	n.serverMux.HandleFunc(WORK_ENDPOINT, WebsocketHandler(n.ProcessIncomingWorkRequests))
-	n.serverMux.HandleFunc(STATUS_ENDPOINT, WebsocketHandler(n.GetNodeStatus))
-	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, n.HandleTransportRequest)
+	n.serverMux.HandleFunc(WORK_ENDPOINT, WebsocketHandler(ctx, n.ProcessIncomingWorkRequests))
+	n.serverMux.HandleFunc(STATUS_ENDPOINT, WebsocketHandler(ctx, n.GetNodeStatus))
+	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, func(w http.ResponseWriter, r *http.Request) {
+		n.HandleTransportRequest(ctx, w, r)
+	})
 	if n.tissue != nil {
-		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(n.tissue.Stream))
+		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(ctx, n.tissue.Stream))
 	}
 
 	go func() {
@@ -383,7 +387,7 @@ func (n *Node) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				n.SendDiffusion()
+				n.SendDiffusion(ctx)
 			case <-ctx.Done():
 				return
 			}
@@ -418,8 +422,9 @@ func ConnectNodes(ctx context.Context, node1, node2 *Node, toNode2 EdgeType, toN
 
 func (n *Node) MakeAvailable(worker Worker) {
 	go func(worker Worker) {
-		manager, ok := n.managers[worker.WorkType()]
+		m, ok := n.managers.Load(worker.WorkType())
 		if ok {
+			manager := m.(*WorkManager)
 			if manager.nextAvailableWorker == nil {
 				manager.nextAvailableWorker = make(chan Worker)
 			}
@@ -431,8 +436,9 @@ func (n *Node) MakeAvailable(worker Worker) {
 func (n *Node) AddWorker(worker Worker) {
 	n.Lock()
 	defer n.Unlock()
-	manager, ok := n.managers[worker.WorkType()]
+	m, ok := n.managers.Load(worker.WorkType())
 	if ok {
+		manager := m.(*WorkManager)
 		if manager.nextAvailableWorker == nil {
 			manager.nextAvailableWorker = make(chan Worker)
 		}
@@ -441,7 +447,7 @@ func (n *Node) AddWorker(worker Worker) {
 			nextAvailableWorker: make(chan Worker),
 			resultChan:          make(chan Work, RESULT_BUFFER_SIZE),
 		}
-		n.managers[worker.WorkType()] = manager
+		n.managers.Store(worker.WorkType(), manager)
 	}
 }
 
@@ -451,11 +457,11 @@ func (n *Node) RemoveWorker(worker Worker) {
 	worker.SetOrgan(nil)
 }
 
-func (n *Node) ProcessIncomingWorkRequests(connection *Connection) {
+func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Connection) {
 	defer connection.Close()
 	for {
 		select {
-		case <-n.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 			work := ReceiveWork(connection)
@@ -463,44 +469,41 @@ func (n *Node) ProcessIncomingWorkRequests(connection *Connection) {
 				n.ReceiveDiffusion(work)
 				continue
 			}
-			manager, ok := n.managers[work.workType]
+			m, ok := n.managers.Load(work.workType)
 			if ok {
+				manager := m.(*WorkManager)
 				if manager.nextAvailableWorker == nil {
 					// Ignore: a request we can't handle with the workers we have.
 					continue
 				}
 				if work.status == 0 {
 					// Recieved work request.
-					ctx, cancel := context.WithTimeout(context.Background(), WAIT_FOR_WORKER_SEC)
+					ctx, cancel := context.WithTimeout(ctx, WAIT_FOR_WORKER_SEC)
 					select {
 					case w := <-manager.nextAvailableWorker:
 						finishedWork := w.Work(ctx, work)
-						// fmt.Printf("%v Finished work: %v\n", n, finishedWork)
 						SendWork(connection, finishedWork)
 						manager.Lock()
 						manager.completedCount++
 						if finishedWork.status != 200 {
 							manager.completedFailureCount++
 							// Need more workers to complete the job.
-							ligand := n.materialPool.GetLigand()
-							if ligand.growth < LIGAND_GROWTH_THRESHOLD {
-								ligand.growth++
-							}
+							n.materialPool.PutLigand(&LigandBlob{
+								growth: 1,
+							})
 						}
 						manager.Unlock()
 					case <-ctx.Done():
 						// Didn't have enough workers to process, we need more cells.
 						// Signal growth ligand.
-						ligand := n.materialPool.GetLigand()
-						if ligand.growth < LIGAND_GROWTH_THRESHOLD {
-							ligand.growth++
-						}
-						n.materialPool.PutLigand(ligand)
+						n.materialPool.PutLigand(&LigandBlob{
+							growth: 1,
+						})
 					}
 					cancel()
 				} else {
 					// Received completed work, which is not expected.
-					log.Fatal(fmt.Sprintf("Should not receive completed work, got %v", work))
+					log.Fatalf("Should not receive completed work, got %v", work)
 				}
 			}
 		}
@@ -511,33 +514,27 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	data := &DiffusionSocketData{}
 	json.Unmarshal([]byte(request.result), data)
 
-	resource := n.materialPool.GetResource()
-	defer n.materialPool.PutResource(resource)
-	resource.Add(&ResourceBlob{
+	n.materialPool.PutResource(&ResourceBlob{
 		o2:       data.Resources.O2,
 		glucose:  data.Resources.Glucose,
 		vitamins: data.Resources.Vitamins,
 	})
-	waste := n.materialPool.GetWaste()
-	defer n.materialPool.PutWaste(waste)
-	waste.Add(&WasteBlob{
+	n.materialPool.PutWaste(&WasteBlob{
 		co2:        data.Waste.CO2,
 		creatinine: data.Waste.Creatinine,
 	})
-	hormone := n.materialPool.GetHormone()
-	defer n.materialPool.PutHormone(hormone)
-	hormone.Add(&HormoneBlob{
-		colony_stimulating_factor:            data.Hormone.ColonyStimulatingFactor,
-		macrophage_colony_stimulating_factor: data.Hormone.MacrophageColonyStimulatingFactor,
+	n.materialPool.PutHormone(&HormoneBlob{
+		granulocyte_csf: data.Hormone.GranulocyteColonyStimulatingFactor,
+		macrophage_csf:  data.Hormone.MacrophageColonyStimulatingFactor,
 	})
 }
 
-func (n *Node) GetNodeStatus(connection *Connection) {
+func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 	defer connection.Close()
 	ticker := time.NewTicker(STATUS_SOCKET_CLOCK_RATE)
 	for {
 		select {
-		case <-n.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			var connections []string
@@ -546,7 +543,9 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				connections = append(connections, address)
 			}
 			var workStatus []WorkStatusData
-			for workType, manager := range n.managers {
+			n.managers.Range(func(w, m any) bool {
+				workType := w.(WorkType)
+				manager := m.(*WorkManager)
 				manager.Lock()
 				workStatus = append(workStatus, WorkStatusData{
 					WorkType:              workType.String(),
@@ -562,7 +561,8 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				manager.completedCount = 0
 				manager.completedFailureCount = 0
 				manager.Unlock()
-			}
+				return true
+			})
 			materialStatus := MaterialStatusData{
 				O2:           n.materialPool.resourcePool.resources.o2,
 				Glucose:      n.materialPool.resourcePool.resources.glucose,
@@ -573,8 +573,8 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 				Hunger:       n.materialPool.ligandPool.ligands.hunger,
 				Asphyxia:     n.materialPool.ligandPool.ligands.asphyxia,
 				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
-				CSF:          n.materialPool.hormonePool.hormones.colony_stimulating_factor,
-				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_colony_stimulating_factor,
+				G_CSF:        n.materialPool.hormonePool.hormones.granulocyte_csf,
+				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_csf,
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
@@ -590,19 +590,16 @@ func (n *Node) GetNodeStatus(connection *Connection) {
 	}
 }
 
-func (n *Node) RequestWork(request Work) (result Work) {
-	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT_SEC)
+func (n *Node) RequestWork(ctx context.Context, request Work) (result Work) {
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SEC)
 	defer cancel()
 	// First try to get a result without sending:
-	manager, ok := n.managers[request.workType]
-	if !ok {
-		manager = &WorkManager{
-			// Skip nextAvailableWorker, to indicate that we can't process
-			// requests of this type.
-			resultChan: make(chan Work, RESULT_BUFFER_SIZE),
-		}
-		n.managers[request.workType] = manager
-	}
+	m, _ := n.managers.LoadOrStore(request.workType, &WorkManager{
+		// Skip nextAvailableWorker, to indicate that we can't process
+		// requests of this type.
+		resultChan: make(chan Work, RESULT_BUFFER_SIZE),
+	})
+	manager := m.(*WorkManager)
 	manager.Lock()
 	manager.requestCount++
 	manager.Unlock()
@@ -614,7 +611,9 @@ func (n *Node) RequestWork(request Work) (result Work) {
 			status:   503,
 		}
 	case result = <-manager.resultChan:
-		// fmt.Printf("%v Received Result: %v\n", n, result)
+		if n.verbose {
+			fmt.Printf("%v Received Result: %v\n", n, result)
+		}
 	default:
 		for _, edge := range n.edges {
 			SendWork(edge.workConnection, request)
@@ -630,7 +629,9 @@ func (n *Node) RequestWork(request Work) (result Work) {
 				status:   503,
 			}
 		case result = <-manager.resultChan:
-			// fmt.Printf("%v Received Result: %v\n", n, result)
+			if n.verbose {
+				fmt.Printf("%v Received Result: %v\n", n, result)
+			}
 		}
 	}
 	manager.Lock()
@@ -643,7 +644,7 @@ func (n *Node) RequestWork(request Work) (result Work) {
 	return
 }
 
-func (n *Node) SendDiffusion() {
+func (n *Node) SendDiffusion(ctx context.Context) {
 	if n.materialPool != nil {
 		if len(n.edges) == 0 {
 			return
@@ -664,9 +665,9 @@ func (n *Node) SendDiffusion() {
 		edge := diffusionEdges[rand.Intn(len(diffusionEdges))]
 
 		// Grab a resource, waste, and hormone blob to diffuse. Can be empty.
-		resource := n.materialPool.SplitResource()
-		waste := n.materialPool.SplitWaste()
-		hormone := n.materialPool.SplitHormone()
+		resource := n.materialPool.SplitResource(ctx)
+		waste := n.materialPool.SplitWaste(ctx)
+		hormone := n.materialPool.SplitHormone(ctx)
 		diffusionData, err := json.Marshal(DiffusionSocketData{
 			Resources: ResourceBlobData{
 				O2:       resource.o2,
@@ -678,8 +679,8 @@ func (n *Node) SendDiffusion() {
 				Creatinine: waste.creatinine,
 			},
 			Hormone: HormoneBlobData{
-				ColonyStimulatingFactor:           hormone.colony_stimulating_factor,
-				MacrophageColonyStimulatingFactor: hormone.macrophage_colony_stimulating_factor,
+				GranulocyteColonyStimulatingFactor: hormone.granulocyte_csf,
+				MacrophageColonyStimulatingFactor:  hormone.macrophage_csf,
 			},
 		})
 		if err != nil {
@@ -700,9 +701,12 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *Con
 			return
 		default:
 			work := ReceiveWork(connection)
-			// fmt.Printf("%v Received Response: %v\n", n, work)
-			manager, ok := n.managers[work.workType]
+			if n.verbose {
+				fmt.Printf("%v Received Response: %v\n", n, work)
+			}
+			m, ok := n.managers.Load(work.workType)
 			if ok {
+				manager := m.(*WorkManager)
 				if work.status == 0 {
 					// Received incompleted work, which is not expected.
 					log.Fatalf("Should not receive incompleted work, got %v", work)
