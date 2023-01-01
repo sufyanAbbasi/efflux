@@ -124,6 +124,9 @@ func (l *LigandBlob) Add(ligand *LigandBlob) {
 	l.hunger += ligand.hunger
 	l.asphyxia += ligand.asphyxia
 	l.inflammation += ligand.inflammation
+	if l.inflammation > LIGAND_INFLAMMATION_MAX {
+		l.inflammation = LIGAND_INFLAMMATION_MAX
+	}
 }
 
 func (l *LigandBlob) Split() *LigandBlob {

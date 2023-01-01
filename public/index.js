@@ -392,6 +392,7 @@ function getCellColor(id) {
             return 'forestgreen';
         case 'Lymphoblast':
         case 'Myeloblast':
+        case 'Monoblast':
             return 'purple';
         case 'Macrophagocyte':
             return 'coral';

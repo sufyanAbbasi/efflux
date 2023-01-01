@@ -85,7 +85,7 @@ func hasOrganOrDie(ctx context.Context, cell CellActor) bool {
 }
 
 func DoWork(ctx context.Context, cell CellActor) bool {
-	cell.Organ().MakeAvailable(ctx, cell)
+	cell.DoWork(ctx)
 	return true
 }
 
@@ -101,42 +101,22 @@ func Explore(ctx context.Context, cell CellActor) bool {
 	y := p.Y
 	y_plus := y + 1
 	y_minus := y - 1
-	points := []image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
+	points := []image.Point{
+		{x_minus, y_plus},
+		{x, y_plus},
+		{x_plus, y_plus},
+		{x_minus, y},
+		{x_plus, y},
+		{x_minus, y_minus},
+		{x, y_minus},
+		{x_plus, y_minus},
+	}
 	isOpen := tissue.rootMatrix.GetOpenSpaces(points)
 	if len(isOpen) > 0 {
 		moveToPoint := isOpen[rand.Intn(len(isOpen))]
-		r := cell.LastPositions()
-		var newPositions []image.Point
-		// Find positions we haven't been to yet.
-		for _, pt := range isOpen {
-			found := false
-			for i := 0; i < r.Len() && r.Value != nil; i++ {
-				if pt == r.Value.(image.Point) {
-					found = true
-					break
-				}
-				r = r.Next()
-			}
-			if !found {
-				newPositions = append(newPositions, pt)
-			}
-		}
+		newPositions := cell.GetUnvisitedPositions(isOpen)
 		if len(newPositions) > 0 {
 			moveToPoint = newPositions[rand.Intn(len(newPositions))]
-			distanceFromCenter := ManhattanDistance(p, image.Point{0, 0})
-			if distanceFromCenter < MAIN_STAGE_RADIUS*2 {
-				// Choose a position that is hopefully away from the center.
-				if (ManhattanDistance(moveToPoint, image.Point{0, 0}) < distanceFromCenter) {
-					// Reroll.
-					moveToPoint = newPositions[rand.Intn(len(newPositions))]
-				}
-			} else if distanceFromCenter > MAIN_STAGE_RADIUS*3 {
-				// Choose a position that is hopefully towards the center.
-				if (ManhattanDistance(moveToPoint, image.Point{0, 0}) > distanceFromCenter) {
-					// Reroll.
-					moveToPoint = newPositions[rand.Intn(len(newPositions))]
-				}
-			}
 		}
 		cell.MoveToPoint(moveToPoint)
 	} else {
@@ -146,19 +126,29 @@ func Explore(ctx context.Context, cell CellActor) bool {
 }
 
 func MoveTowardsChemotaxisCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveTowardsCytokines([]CytokineType{induce_chemotaxis}) {
+	if rand.Intn(5) == 0 {
+		return Explore(ctx, cell)
+	} else if !cell.MoveTowardsCytokines([]CytokineType{induce_chemotaxis}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
-func MoveTowardsCellDamageCytokine(ctx context.Context, cell CellActor) bool {
-	cell.MoveTowardsCytokines([]CytokineType{cell_damage})
+func MoveTowardsCellDamageCytokineOrExplore(ctx context.Context, cell CellActor) bool {
+	if rand.Intn(5) == 0 {
+		return Explore(ctx, cell)
+	} else if !cell.MoveTowardsCytokines([]CytokineType{cell_damage}) {
+		return Explore(ctx, cell)
+	}
 	return true
 }
 
-func MoveTowardsAntigenPresentCytokine(ctx context.Context, cell CellActor) bool {
-	cell.MoveTowardsCytokines([]CytokineType{antigen_present})
+func MoveTowardsAntigenPresentCytokineOrExplore(ctx context.Context, cell CellActor) bool {
+	if rand.Intn(5) == 0 {
+		return Explore(ctx, cell)
+	} else if !cell.MoveTowardsCytokines([]CytokineType{antigen_present}) {
+		return Explore(ctx, cell)
+	}
 	return true
 }
 
@@ -413,9 +403,11 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		fallthrough
 	case Myeloblast:
 		fallthrough
+	case Monoblast:
+		fallthrough
 	case Macrophagocyte:
 		fallthrough
-	case Neutrocytes:
+	case Neutrocyte:
 		fallthrough
 	case NaturalKillerCell:
 		fallthrough
@@ -519,13 +511,38 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode = currNode.next
 	}
 	if c.CanMove() {
-		currNode.next = &StateNode{
-			function: &ProteinFunction{
-				action:   MoveTowardsChemotaxisCytokineOrExplore,
-				proteins: GenerateRandomProteinPermutation(c),
-			},
+		switch c.CellType() {
+		case Lymphoblast:
+			fallthrough
+		case Myeloblast:
+			fallthrough
+		case Monoblast:
+			fallthrough
+		case Neutrocyte:
+			currNode.next = &StateNode{
+				function: &ProteinFunction{
+					action:   MoveTowardsChemotaxisCytokineOrExplore,
+					proteins: GenerateRandomProteinPermutation(c),
+				},
+			}
+			currNode = currNode.next
+		case Macrophagocyte:
+			currNode.next = &StateNode{
+				function: &ProteinFunction{
+					action:   MoveTowardsAntigenPresentCytokineOrExplore,
+					proteins: GenerateRandomProteinPermutation(c),
+				},
+			}
+			currNode = currNode.next
+		default:
+			currNode.next = &StateNode{
+				function: &ProteinFunction{
+					action:   Explore,
+					proteins: GenerateRandomProteinPermutation(c),
+				},
+			}
+			currNode = currNode.next
 		}
-		currNode = currNode.next
 	}
 	if c.CanInteract() {
 		currNode.next = &StateNode{
@@ -567,7 +584,9 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 // Bacteria Related CellActions
 
 func BacteriaMoveAwayFromCytokinesOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveAwayFromCytokines([]CytokineType{induce_chemotaxis, cytotoxins}) {
+	if rand.Intn(5) == 0 {
+		return Explore(ctx, cell)
+	} else if !cell.MoveAwayFromCytokines([]CytokineType{cytotoxins}) {
 		return Explore(ctx, cell)
 	}
 	return true

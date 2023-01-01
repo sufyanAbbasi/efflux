@@ -124,20 +124,23 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 			}
 		}
 	}(connection)
+	streamedTissue := 5
 	for {
+		r := make(chan RenderableData, RENDER_BUFFER_SIZE)
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			err := t.StreamMatrices(connection)
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					fmt.Printf("error: %v", err)
+		case t.streamingChan <- r:
+			if streamedTissue > 0 {
+				err := t.StreamMatrices(connection)
+				if err != nil {
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+						fmt.Printf("error: %v", err)
+					}
+					return
 				}
-				return
+				streamedTissue--
 			}
-			r := make(chan RenderableData, RENDER_BUFFER_SIZE)
-			t.streamingChan <- r
 			for renderable := range r {
 				err := connection.WriteJSON(renderable)
 				if err != nil {
@@ -260,7 +263,15 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 	y := r.position.Y
 	y_plus := y + 1
 	y_minus := y - 1
-	points := [9]image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
+	points := [9]image.Point{{x_minus, y_plus},
+		{x, y_plus},
+		{x_plus, y_plus},
+		{x_minus, y},
+		{x, y},
+		{x_plus, y},
+		{x_minus, y_minus},
+		{x, y_minus},
+		{x_plus, y_minus}}
 	var interactionChans [9]chan CellActor
 	for i, pt := range points {
 		interactionChan, _ := m.interactionsChan.LoadOrStore(pt, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
@@ -376,7 +387,8 @@ func (m *ExtracellularMatrix) Bounds() image.Rectangle {
 func (m *ExtracellularMatrix) At(x, y int) color.Color {
 	pt := image.Point{x, y}
 	if m.walls.InBounds(pt) {
-		return m.GetCytokineColor(pt)
+		return color.White
+		// return m.GetCytokineColor(pt)
 	}
 	return color.Black
 }
@@ -399,22 +411,22 @@ func (m *ExtracellularMatrix) GetCytokineColor(pt image.Point) color.Color {
 			case cell_damage:
 				// Red.
 				h = 0
+			case cytotoxins:
+				// Pink.
+				h = float64(280) / float64(360)
 			case antigen_present:
 				// Orange.
 				h = float64(25) / float64(360)
 			case induce_chemotaxis:
 				// Green.
 				h = float64(125) / float64(360)
-			case cytotoxins:
-				// Pink.
-				h = float64(300) / float64(360)
 			}
 			hues = append(hues, h)
 		}
 	}
 	if len(hues) > 0 {
 		l := 1 - 0.5*float64(concentration)/float64(math.MaxInt8)
-		h := hues[rand.Intn(len(hues))]
+		h := hues[0]
 		r, g, b := HSLtoRGB(h, 1, l)
 		return color.RGBA{r, g, b, math.MaxUint8}
 	} else {

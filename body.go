@@ -86,7 +86,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	// Generate Prokaryotic Cells
 	nodeTypes = [][]*Node{
 		b.gutNodes,
-		b.skinNodes,
+		{b.skinNodes[0]},
 	}
 	cellTypes = []CellType{
 		Bacteroidota,
@@ -94,7 +94,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	counts = []int{
 		1, // Gut
-		1, // Skin
+		5, // Skin
 	}
 	names := []string{
 		"Bacteroides",

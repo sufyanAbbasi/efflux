@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"log"
 	"math/rand"
 	"net/http"
@@ -229,7 +230,10 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 		}
 	}
 	if render == nil {
-		render = &Renderable{}
+		// Place cell somewhere random.
+		render = &Renderable{
+			position: image.Point{RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS), RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS)},
+		}
 	}
 	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.TransportPath, request.WantPath), nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"math"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -27,9 +28,10 @@ const (
 	Podocyte          // Kidney Cell
 	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast and Myeloblast
 	Lymphoblast       // Stem Cell, becomes NK, B cells, T cells
-	Myeloblast        // Stem Cell, becomes Neutrophil, Macrophages, and Dendritic cells
+	Myeloblast        // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
+	Monoblast         // Stem Cell, becomes Macrophages and Dendritic cells
 	Macrophagocyte    // Macrophage
-	Neutrocytes       // Neutrophils
+	Neutrocyte        // Neutrophils
 	NaturalKillerCell // Natural Killer Cells
 	TLymphocyte       // T Cell
 	Dendritic         // Dendritic Cells
@@ -63,9 +65,11 @@ func (c CellType) String() string {
 		return "Lymphoblast"
 	case Myeloblast:
 		return "Myeloblast"
+	case Monoblast:
+		return "Monoblast"
 	case Macrophagocyte:
 		return "Macrophagocyte"
-	case Neutrocytes:
+	case Neutrocyte:
 		return "Neutrophil"
 	case NaturalKillerCell:
 		return "NaturalKiller"
@@ -89,8 +93,10 @@ type CellActor interface {
 	Verbose() bool
 	Tissue() *Tissue
 	DoesWork() bool
+	DoWork(ctx context.Context)
 	Position() image.Point
 	LastPositions() *ring.Ring
+	GetUnvisitedPositions([]image.Point) []image.Point
 	BroadcastPosition(ctx context.Context)
 	SpawnTime() time.Time
 	Function() *StateDiagram
@@ -212,7 +218,7 @@ func (c *Cell) Repair(damage int) {
 		c.damage -= damage
 	}
 	if c.Verbose() {
-		fmt.Println("Repaired:", c)
+		fmt.Println("Repaired:", c, "- damage", c.damage, "in", c.organ)
 	}
 }
 
@@ -221,7 +227,7 @@ func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
 	c.Organ().materialPool.PutWaste(waste)
 	return waste.creatinine >= DAMAGE_CREATININE_THRESHOLD ||
 		waste.co2 >= DAMAGE_CO2_THRESHOLD ||
-		c.GetCytokineConcentrationAt(cytotoxins, c.Position()) > 0
+		c.GetCytokineConcentrationAt(cytotoxins, c.Position()) > CYTOTOXIN_DAMAGE_THRESHOLD
 }
 
 func (c *Cell) IncurDamage(damage int) {
@@ -252,6 +258,10 @@ func (c *Cell) Apoptosis() {
 
 func (c *Cell) IsApoptosis() bool {
 	return c.Tissue() == nil
+}
+
+func (c *Cell) DoWork(ctx context.Context) {
+	panic("unimplemented")
 }
 
 func (c *Cell) Work(ctx context.Context, request Work) Work {
@@ -346,9 +356,6 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 	for !reflect.DeepEqual(c.resourceNeed, new(ResourceBlob)) {
 		select {
 		case <-ctx.Done():
-			if c.Verbose() {
-				fmt.Println(c, "resource collection timeout in", c.organ)
-			}
 			return false
 		default:
 			resource := c.organ.materialPool.GetResource(ctx)
@@ -374,9 +381,11 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Myeloblast:
 		fallthrough
+	case Monoblast:
+		fallthrough
 	case Macrophagocyte:
 		fallthrough
-	case Neutrocytes:
+	case Neutrocyte:
 		fallthrough
 	case NaturalKillerCell:
 		fallthrough
@@ -434,9 +443,11 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Myeloblast:
 			fallthrough
+		case Monoblast:
+			fallthrough
 		case Macrophagocyte:
 			fallthrough
-		case Neutrocytes:
+		case Neutrocyte:
 			fallthrough
 		case NaturalKillerCell:
 			fallthrough
@@ -475,6 +486,25 @@ func (c *Cell) Position() image.Point {
 
 func (c *Cell) LastPositions() *ring.Ring {
 	return c.render.lastPositions
+}
+
+func (c *Cell) GetUnvisitedPositions(pts []image.Point) (unvisited []image.Point) {
+	r := c.LastPositions()
+	// Find positions we haven't been to yet.
+	for _, pt := range pts {
+		found := false
+		for i := 0; i < r.Len() && r.Value != nil; i++ {
+			if pt == r.Value.(image.Point) {
+				found = true
+				break
+			}
+			r = r.Next()
+		}
+		if !found {
+			unvisited = append(unvisited, pt)
+		}
+	}
+	return
 }
 
 func (c *Cell) SpawnTime() time.Time {
@@ -529,45 +559,63 @@ func (c *Cell) GetNearestCytokines(t []CytokineType) (points []image.Point, conc
 	y := c.render.position.Y
 	y_plus := y + CYTOKINE_SENSE_RANGE
 	y_minus := y - CYTOKINE_SENSE_RANGE
-	points = []image.Point{{x_minus, y_plus}, {x, y_plus}, {x_plus, y_plus}, {x_minus, y}, {x, y}, {x_plus, y}, {x_minus, y_minus}, {x, y_minus}, {x_plus, y_minus}}
-	concentrations = tissue.rootMatrix.GetCytokineContentrations(points, t)
+	points = []image.Point{
+		{x_minus, y_plus},
+		{x, y_plus},
+		{x_plus, y_plus},
+		{x_minus, y},
+		{x_plus, y},
+		{x_minus, y_minus},
+		{x, y_minus},
+		{x_plus, y_minus},
+	}
+	isOpen := tissue.rootMatrix.GetOpenSpaces(points)
+	if len(isOpen) > 0 {
+		concentrations = tissue.rootMatrix.GetCytokineContentrations(isOpen, t)
+	}
 	return
 }
 
 func (c *Cell) MoveTowardsCytokines(t []CytokineType) bool {
 	points, concentrations := c.GetNearestCytokines(t)
-	maxIndex := -1
+	var indices []int
 	maxVal := uint8(0)
 	for i, cns := range concentrations {
 		for _, v := range cns {
 			if v > maxVal {
 				maxVal = v
-				maxIndex = i
+				indices = []int{i}
+			} else if v != 0 && v == maxVal {
+				indices = append(indices, i)
 			}
 		}
 	}
-	if maxIndex >= 0 {
-		c.MoveToPoint(points[maxIndex])
+	if len(indices) > 0 {
+		moveToPoint := points[indices[rand.Intn(len(indices))]]
+		c.MoveToPoint(moveToPoint)
 	}
-	return maxIndex >= 0
+	return len(indices) > 0
 }
 
 func (c *Cell) MoveAwayFromCytokines(t []CytokineType) bool {
 	points, concentrations := c.GetNearestCytokines(t)
-	minIndex := -1
-	minVal := uint8(0)
+	var indices []int
+	minVal := uint8(math.MaxUint8)
 	for i, cns := range concentrations {
 		for _, v := range cns {
 			if v < minVal {
 				minVal = v
-				minIndex = i
+				indices = []int{i}
+			} else if v == minVal {
+				indices = append(indices, i)
 			}
 		}
 	}
-	if minIndex >= 0 {
-		c.MoveToPoint(points[minIndex])
+	if len(indices) > 0 {
+		moveToPoint := points[indices[rand.Intn(len(indices))]]
+		c.MoveToPoint(moveToPoint)
 	}
-	return minIndex >= 0
+	return len(indices) > 0
 }
 
 func (c *Cell) DropCytokine(t CytokineType, concentration uint8) uint8 {
@@ -694,6 +742,10 @@ func (e *EukaryoticCell) DoesWork() bool {
 	return e.cellType != Hemocytoblast
 }
 
+func (e *EukaryoticCell) DoWork(ctx context.Context) {
+	e.organ.MakeAvailable(ctx, e)
+}
+
 func (e *EukaryoticCell) SetOrgan(node *Node) {
 	e.Cell.SetOrgan(node)
 	e.organ.AddWorker(e)
@@ -745,8 +797,9 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 		}
 		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
+		// TODO: Differentiate into Lymphoblasts.
 		e.organ.materialPool.PutHormone(hormone)
 		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
 	default:
@@ -774,7 +827,7 @@ func (e *EukaryoticCell) IsAerobic() bool {
 }
 
 func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &EukaryoticCell{
@@ -814,9 +867,11 @@ func (i *Leukocyte) CanTransport() bool {
 		return true
 	case Myeloblast:
 		return true
+	case Monoblast:
+		return true
 	case Macrophagocyte:
 		return false
-	case Neutrocytes:
+	case Neutrocyte:
 		return false
 	case NaturalKillerCell:
 		return false
@@ -835,7 +890,9 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 		fallthrough
 	case Myeloblast:
 		fallthrough
-	case Neutrocytes:
+	case Monoblast:
+		fallthrough
+	case Neutrocyte:
 		// Wait until the lifespan is over before moving on.
 		if time.Now().Before(i.spawnTime.Add(i.lifeSpan)) {
 			return false
@@ -879,32 +936,40 @@ func (i *Leukocyte) CanInteract() bool {
 	return true
 }
 
-func (i *Leukocyte) Mitosis(ctx context.Context) bool {
-	// https://en.wikipedia.org/wiki/Metamyelocyte#/media/File:Hematopoiesis_(human)_diagram_en.svg
-	switch i.cellType {
-	case Lymphoblast:
-		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath)
-
-	case Myeloblast:
-		// Can differentiate into Neutrophil, Macrophage, and Dendritic.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocytes, nothing, string(i.render.id), i.transportPath, i.wantPath)
-	}
-	// After differentiating, the existing cell will be converted to another, so clean up the existing one.
-	return false
-}
-
 func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 	// Overloading mitosis with differentiation. Once differentiated, the existing cell will disappear.
 	switch i.cellType {
 	case Lymphoblast:
 		fallthrough
 	case Myeloblast:
+		fallthrough
+	case Monoblast:
 		// If there is no inflammation, don't differentiate.
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
-		return ligand.inflammation >= LEUKOCYTE_INFLAMMATION_THRESHOLD
+		if ligand.inflammation >= LEUKOCYTE_INFLAMMATION_THRESHOLD {
+			ligand.inflammation -= LEUKOCYTE_INFLAMMATION_THRESHOLD
+			return true
+		}
 	}
+	// All other leukocytes don't differentiate.
+	return false
+}
+
+func (i *Leukocyte) Mitosis(ctx context.Context) bool {
+	// https://en.wikipedia.org/wiki/Metamyelocyte#/media/File:Hematopoiesis_(human)_diagram_en.svg
+	switch i.cellType {
+	case Lymphoblast:
+		// Can differentiate into Natural Killer, B Cell, and T Cells.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath)
+	case Myeloblast:
+		// Can differentiate into Neutrophil.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
+	case Monoblast:
+		// Can differentiate into Macrophage and Dendritic cells.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
+	}
+	// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 	return false
 }
 
@@ -927,7 +992,7 @@ func (l *LeukocyteStemCell) BroadcastPosition(ctx context.Context) {
 }
 
 func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &LeukocyteStemCell{
@@ -990,9 +1055,6 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	//      made of DNA and toxins to keep them in place and cause damage.
 	//
 	n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
-	n.Organ().materialPool.PutLigand(&LigandBlob{
-		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
-	})
 	if n.GetCytokineConcentrationAt(antigen_present, c.Position()) >= NEUTROPHIL_NETOSIS_THRESHOLD {
 		n.inNETosis = true
 	}
@@ -1010,10 +1072,108 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 }
 
 func CopyNeutrophil(base *Neutrophil) *Neutrophil {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &Neutrophil{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: base.cellType,
+				dna:      base.dna,
+				mhc_i:    base.dna.MHC_I(),
+				workType: base.workType,
+				render: &Renderable{
+					id:            MakeRenderId(base.cellType.String()),
+					visible:       true,
+					position:      position,
+					targetX:       base.render.targetX,
+					targetY:       base.render.targetY,
+					targetZ:       base.render.targetZ,
+					lastPositions: positionTracker,
+				},
+				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
+			},
+			lifeSpan: base.lifeSpan,
+		},
+	}
+}
+
+type MacrophageMode int
+
+const (
+	suppress MacrophageMode = iota
+	attack
+	hyperattack
+)
+
+type Macrophage struct {
+	*Leukocyte
+	mode              MacrophageMode
+	proteinSignatures map[Protein]bool
+}
+
+func (m *Macrophage) Start(ctx context.Context) {
+	m.function = m.dna.makeFunction(m)
+	go m.function.Run(ctx, m)
+	m.Tissue().Attach(m.render)
+}
+
+func (m *Macrophage) BroadcastPosition(ctx context.Context) {
+	m.Tissue().BroadcastPosition(ctx, m, m.render)
+}
+
+func (m *Macrophage) CanTransport() bool {
+	// Too big to travel around freely.
+	return false
+}
+
+func (m *Macrophage) DoesWork() bool {
+	return true
+}
+
+func (m *Macrophage) DoWork(ctx context.Context) {
+
+	// Reduce inflammation if too much.
+	ligand := m.Organ().materialPool.GetLigand(ctx)
+	if ligand.inflammation > LIGAND_INFLAMMATION_MACROPHAGE_CONSUMPTION {
+		ligand.inflammation -= LIGAND_INFLAMMATION_MACROPHAGE_CONSUMPTION
+	}
+	m.Organ().materialPool.PutLigand(ligand)
+}
+
+func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
+	antigen := c.PresentAntigen(false)
+	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
+		return
+	}
+	// It's bacteria, time to kill.
+	// Macrophage have one basic attack: phagocytosis. But when no pathogen is
+	// present, they have to suppress the inflammation response.
+	m.mode = attack
+	m.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
+	m.Organ().materialPool.PutLigand(&LigandBlob{
+		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
+	})
+	m.Organ().materialPool.PutHormone(&HormoneBlob{
+		macrophage_csf:  HORMONE_MACROPHAGE_CSF_DROP,
+		granulocyte_csf: HORMONE_MACROPHAGE_CSF_DROP,
+	})
+	// Phagocytosis.
+	m.Trap(c)
+	c.IncurDamage(MAX_DAMAGE)
+	// Pick up protein signatures for presentation.
+	for _, protein := range antigen.proteins {
+		m.proteinSignatures[protein] = true
+	}
+}
+
+func CopyMacrophage(base *Macrophage) *Macrophage {
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
+	return &Macrophage{
 		Leukocyte: &Leukocyte{
 			Cell: &Cell{
 				cellType: base.cellType,
@@ -1064,53 +1224,10 @@ func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
 }
 
 func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &NaturalKiller{
-		Leukocyte: &Leukocyte{
-			Cell: &Cell{
-				cellType: base.cellType,
-				dna:      base.dna,
-				mhc_i:    base.dna.MHC_I(),
-				workType: base.workType,
-				render: &Renderable{
-					id:            MakeRenderId(base.cellType.String()),
-					visible:       true,
-					position:      position,
-					targetX:       base.render.targetX,
-					targetY:       base.render.targetY,
-					targetZ:       base.render.targetZ,
-					lastPositions: positionTracker,
-				},
-				transportPath: base.transportPath,
-				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
-			},
-			lifeSpan: base.lifeSpan,
-		},
-	}
-}
-
-type Macrophage struct {
-	*Leukocyte
-}
-
-func (m *Macrophage) Start(ctx context.Context) {
-	m.function = m.dna.makeFunction(m)
-	go m.function.Run(ctx, m)
-	m.Tissue().Attach(m.render)
-}
-
-func (m *Macrophage) BroadcastPosition(ctx context.Context) {
-	m.Tissue().BroadcastPosition(ctx, m, m.render)
-}
-
-func CopyMacrophage(base *Macrophage) *Macrophage {
-	position := image.Point{base.render.position.X, base.render.position.Y}
-	positionTracker := ring.New(POSITION_TRACKER_SIZE)
-	positionTracker.Value = position
-	return &Macrophage{
 		Leukocyte: &Leukocyte{
 			Cell: &Cell{
 				cellType: base.cellType,
@@ -1161,7 +1278,7 @@ func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
 }
 
 func CopyTCell(base *TCell) *TCell {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &TCell{
@@ -1220,7 +1337,7 @@ func (d *DendriticCell) FoundMatch(t *TCell) bool {
 }
 
 func CopyDendriticCell(base *DendriticCell) *DendriticCell {
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &DendriticCell{
@@ -1264,7 +1381,7 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 	default:
 		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
 	}
-	position := image.Point{base.render.position.X, base.render.position.Y}
+	position := image.Point{base.render.position.X - 1, base.render.position.Y}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &ProkaryoticCell{
@@ -1396,6 +1513,8 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 	case Lymphoblast:
 		fallthrough
 	case Myeloblast:
+		fallthrough
+	case Monoblast:
 		cell = CopyLeukocyteStemCell(&LeukocyteStemCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -1425,7 +1544,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				lifeSpan: MACROPHAGE_LIFE_SPAN,
 			},
 		})
-	case Neutrocytes:
+	case Neutrocyte:
 		cell = CopyNeutrophil(&Neutrophil{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -1499,7 +1618,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		fallthrough
 	case Enterocyte:
 		fallthrough
-	default:
+	case Podocyte:
+		fallthrough
+	case Hemocytoblast:
 		cell = CopyEukaryoticCell(&EukaryoticCell{
 			Cell: &Cell{
 				cellType:      cellType,
@@ -1511,6 +1632,8 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				spawnTime:     time.Now(),
 			},
 		})
+	default:
+		panic(fmt.Sprintf("Unknown cell type: %v", cellType))
 	}
 	return
 }
