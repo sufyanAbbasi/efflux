@@ -19,6 +19,7 @@ var BACTERIA_DNA = DNAType(elliptic.P384())
 var VIRUS_RNA = DNAType(elliptic.P224())
 
 var BACTERIA_MOLECULAR_MOTIF = MollecularPattern("3940200619")
+var VIRAL_MOLECULAR_MOTIF = MollecularPattern("26959946667")
 
 var DNATypeMap = map[int]DNAType{
 	521: HUMAN_DNA,

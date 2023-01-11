@@ -64,6 +64,7 @@ class Node {
         this.socket = null;
         this.edges = new WeakSet();
         this.render = null;
+        this.active = false;
         this.renderCyNode();
         this.setupStatusConnection(address);
     }
@@ -143,6 +144,12 @@ class Node {
         labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
+        if (this.active) {
+            const details = document.querySelector('.panel .details')
+            if (details) {
+                render(labels.map((label) => html`<pre>${label}</pre>`), details);
+            }
+        }
     }
 
     renderCyNode() {
@@ -202,7 +209,7 @@ class Node {
                     position="0 0 50">
                 </a-camera>
             </a-scene>
-            <div class="close-container"></div>`, renderContainer);
+            <div class="panel"></div>`, renderContainer);
         }
         this.setUpScene();
         document.querySelector('.render').classList.add('show');
@@ -210,6 +217,7 @@ class Node {
     }
 
     async collapseScene() {
+        this.active = false;
         // May be called multiple times.
         for (const el of document.querySelectorAll('.disposable')) {
             el.remove();
@@ -217,15 +225,23 @@ class Node {
         await this.render?.close();
         const renderContainer = document.querySelector('.render')
         renderContainer?.classList?.remove('show')
-        document.querySelector('.close')?.remove();
+        const panel = document.querySelector('.panel');
+        while (panel && panel.firstChild) {
+            panel.removeChild(panel.firstChild);
+        }
     }
 
     setUpScene() {
+        this.active = true;
         const container = document.createElement('div');
         render(html`<button class="close" @click="${() => {
             this.collapseScene();
-        }}">Close</button>`, container);
-        document.querySelector('.close-container').appendChild(container.firstElementChild);
+        }}">Close</button>
+        <details>
+            <summary>Info</summary>
+            <p class="details"></p>
+        </details>`, container);
+        document.querySelector('.panel').appendChild(container);
     }
 }
 

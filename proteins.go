@@ -43,8 +43,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				} else {
 					cancel()
 				}
-			default:
-				cell.BroadcastPosition(ctx)
+			case <-cell.BroadcastPosition(ctx):
 			}
 		}
 	}
@@ -156,7 +155,7 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	// Not all cells can repair, but for the sake of this simulation, they can.
 	resource := cell.Organ().materialPool.GetResource(ctx)
 	defer cell.Organ().materialPool.PutResource(resource)
-	if cell.Damage() > 0 {
+	if cell.Damage() > 0 && cell.CanRepair() {
 		repair := resource.vitamins
 		if resource.vitamins >= cell.Damage() {
 			resource.vitamins -= cell.Damage()
@@ -512,13 +511,13 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 	}
 	if c.CanMove() {
 		switch c.CellType() {
+		case Neutrocyte:
+			fallthrough
 		case Lymphoblast:
 			fallthrough
 		case Myeloblast:
 			fallthrough
 		case Monoblast:
-			fallthrough
-		case Neutrocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,

@@ -235,7 +235,7 @@ func (t *Tissue) ConsumeCytokines(r *Renderable, cType CytokineType, consumption
 	return m.ConsumeCytokines(r.position, cType, consumptionRate)
 }
 
-func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Renderable) {
+func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Renderable, positionChan chan struct{}) {
 	m := t.FindMatrix(r)
 	if m == nil {
 		return
@@ -243,13 +243,13 @@ func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Rende
 	interactionChan, _ := m.interactionsChan.LoadOrStore(r.position, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
 	ctx, cancel := context.WithTimeout(ctx, BROADCAST_INTERACTION_TIMEOUT_SEC)
 	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case interactionChan.(chan CellActor) <- cell:
-		}
+	select {
+	case <-ctx.Done():
+		positionChan <- struct{}{}
+		return
+	case interactionChan.(chan CellActor) <- cell:
 	}
+
 }
 
 func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactions []CellActor) {

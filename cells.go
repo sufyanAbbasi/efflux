@@ -97,7 +97,7 @@ type CellActor interface {
 	Position() image.Point
 	LastPositions() *ring.Ring
 	GetUnvisitedPositions([]image.Point) []image.Point
-	BroadcastPosition(ctx context.Context)
+	BroadcastPosition(ctx context.Context) chan struct{}
 	SpawnTime() time.Time
 	Function() *StateDiagram
 	WillMitosis(context.Context) bool
@@ -105,6 +105,7 @@ type CellActor interface {
 	CollectResources(context.Context) bool
 	ProduceWaste()
 	Damage() int
+	CanRepair() bool
 	Repair(int)
 	ShouldIncurDamage(context.Context) bool
 	IncurDamage(int)
@@ -211,6 +212,10 @@ func (c *Cell) Damage() int {
 	return c.damage
 }
 
+func (c *Cell) CanRepair() bool {
+	return true
+}
+
 func (c *Cell) Repair(damage int) {
 	if c.damage <= damage {
 		c.damage = 0
@@ -218,7 +223,7 @@ func (c *Cell) Repair(damage int) {
 		c.damage -= damage
 	}
 	if c.Verbose() {
-		fmt.Println("Repaired:", c, "- damage", c.damage, "in", c.organ)
+		// fmt.Println("Repaired:", c, "- damage", c.damage, "in", c.organ)
 	}
 }
 
@@ -233,7 +238,7 @@ func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
 func (c *Cell) IncurDamage(damage int) {
 	c.damage += int(damage)
 	if c.Verbose() {
-		fmt.Println("Damaged:", c, "- damage", c.damage, "in", c.organ)
+		// fmt.Println("Damaged:", c, "- damage", c.damage, "in", c.organ)
 	}
 }
 
@@ -751,8 +756,20 @@ func (e *EukaryoticCell) SetOrgan(node *Node) {
 	e.organ.AddWorker(e)
 }
 
-func (e *EukaryoticCell) BroadcastPosition(ctx context.Context) {
-	e.Tissue().BroadcastPosition(ctx, e, e.render)
+func (e *EukaryoticCell) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := e.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go e.Tissue().BroadcastPosition(ctx, e, e.render, positionChan)
+	return positionChan
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -886,13 +903,13 @@ func (i *Leukocyte) CanTransport() bool {
 
 func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 	switch i.cellType {
+	case Neutrocyte:
+		fallthrough
 	case Lymphoblast:
 		fallthrough
 	case Myeloblast:
 		fallthrough
 	case Monoblast:
-		fallthrough
-	case Neutrocyte:
 		// Wait until the lifespan is over before moving on.
 		if time.Now().Before(i.spawnTime.Add(i.lifeSpan)) {
 			return false
@@ -987,8 +1004,20 @@ func (l *LeukocyteStemCell) Start(ctx context.Context) {
 	l.Tissue().Attach(l.render)
 }
 
-func (l *LeukocyteStemCell) BroadcastPosition(ctx context.Context) {
-	l.Tissue().BroadcastPosition(ctx, l, l.render)
+func (l *LeukocyteStemCell) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := l.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go l.Tissue().BroadcastPosition(ctx, l, l.render, positionChan)
+	return positionChan
 }
 
 func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
@@ -1029,14 +1058,30 @@ func (n *Neutrophil) ShouldIncurDamage(ctx context.Context) bool {
 	return n.Cell.ShouldIncurDamage(ctx) && n.inNETosis
 }
 
+func (n *Neutrophil) CanRepair() bool {
+	return !n.inNETosis
+}
+
 func (n *Neutrophil) Start(ctx context.Context) {
 	n.function = n.dna.makeFunction(n)
 	go n.function.Run(ctx, n)
 	n.Tissue().Attach(n.render)
 }
 
-func (n *Neutrophil) BroadcastPosition(ctx context.Context) {
-	n.Tissue().BroadcastPosition(ctx, n, n.render)
+func (n *Neutrophil) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := n.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go n.Tissue().BroadcastPosition(ctx, n, n.render, positionChan)
+	return positionChan
 }
 
 func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
@@ -1052,16 +1097,19 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	//      checking if the bacteria has been around for some time.
 	//  2 - Degranulations: Release cytotoxic chemicals to cause damage.
 	//  3 - Neutrophil Extracellular Traps: Trap bacteria in a web of innards
-	//      made of DNA and toxins to keep them in place and cause damage.
-	//
-	n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
-	if n.GetCytokineConcentrationAt(antigen_present, c.Position()) >= NEUTROPHIL_NETOSIS_THRESHOLD {
+	//      made of DNA and toxins to keep them in place and cause damage. If
+	//      there is a high concentration of antigen_present cytokine, then
+	//      NETosis is triggered.
+	antigenPresentConcentration := n.GetCytokineConcentrationAt(antigen_present, c.Position())
+	if !n.inNETosis && antigenPresentConcentration >= NEUTROPHIL_NETOSIS_THRESHOLD {
 		n.inNETosis = true
+	} else {
+		n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 	}
 	if n.inNETosis {
 		n.Trap(c)
 		c.IncurDamage(NEUTROPHIL_NET_DAMAGE)
-	} else if c.SpawnTime().Add(15 * time.Minute).After(time.Now()) {
+	} else if c.SpawnTime().Add(NEUTROPHIL_OPSONIN_TIME).Before(time.Now()) {
 		// Enough time has passed that bacteria should be covered in opsonins.
 		// Can perform phagocytosis without NET, which is insta kill.
 		n.Trap(c)
@@ -1102,15 +1150,8 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 
 type MacrophageMode int
 
-const (
-	suppress MacrophageMode = iota
-	attack
-	hyperattack
-)
-
 type Macrophage struct {
 	*Leukocyte
-	mode              MacrophageMode
 	proteinSignatures map[Protein]bool
 }
 
@@ -1120,8 +1161,20 @@ func (m *Macrophage) Start(ctx context.Context) {
 	m.Tissue().Attach(m.render)
 }
 
-func (m *Macrophage) BroadcastPosition(ctx context.Context) {
-	m.Tissue().BroadcastPosition(ctx, m, m.render)
+func (m *Macrophage) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := m.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go m.Tissue().BroadcastPosition(ctx, m, m.render, positionChan)
+	return positionChan
 }
 
 func (m *Macrophage) CanTransport() bool {
@@ -1151,8 +1204,8 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	// It's bacteria, time to kill.
 	// Macrophage have one basic attack: phagocytosis. But when no pathogen is
 	// present, they have to suppress the inflammation response.
-	m.mode = attack
 	m.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
+	m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 	m.Organ().materialPool.PutLigand(&LigandBlob{
 		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
 	})
@@ -1208,8 +1261,20 @@ func (n *NaturalKiller) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
-func (n *NaturalKiller) BroadcastPosition(ctx context.Context) {
-	n.Tissue().BroadcastPosition(ctx, n, n.render)
+func (n *NaturalKiller) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := n.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go n.Tissue().BroadcastPosition(ctx, n, n.render, positionChan)
+	return positionChan
 }
 
 func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
@@ -1263,8 +1328,20 @@ func (t *TCell) Start(ctx context.Context) {
 	t.Tissue().Attach(t.render)
 }
 
-func (t *TCell) BroadcastPosition(ctx context.Context) {
-	t.Tissue().BroadcastPosition(ctx, t, t.render)
+func (t *TCell) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := t.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go t.Tissue().BroadcastPosition(ctx, t, t.render, positionChan)
+	return positionChan
 }
 
 func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
@@ -1318,8 +1395,20 @@ func (d *DendriticCell) Start(ctx context.Context) {
 	d.Tissue().Attach(d.render)
 }
 
-func (d *DendriticCell) BroadcastPosition(ctx context.Context) {
-	d.Tissue().BroadcastPosition(ctx, d, d.render)
+func (d *DendriticCell) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := d.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go d.Tissue().BroadcastPosition(ctx, d, d.render, positionChan)
+	return positionChan
 }
 
 func (d *DendriticCell) Collect(t AntigenPresenting) {
@@ -1425,12 +1514,24 @@ func (p *ProkaryoticCell) CanTransport() bool {
 	return true
 }
 
-func (p *ProkaryoticCell) BroadcastPosition(ctx context.Context) {
+func (p *ProkaryoticCell) CanRepair() bool {
+	return false
+}
+
+func (p *ProkaryoticCell) BroadcastPosition(ctx context.Context) chan struct{} {
+	positionChan := make(chan struct{})
 	tissue := p.Tissue()
 	if tissue == nil {
-		return
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
 	}
-	tissue.BroadcastPosition(ctx, p, p.render)
+	go p.Tissue().BroadcastPosition(ctx, p, p.render, positionChan)
+	return positionChan
 }
 
 func (p *ProkaryoticCell) WillMitosis(context.Context) bool {

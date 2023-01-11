@@ -86,19 +86,15 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	// Generate Prokaryotic Cells
 	nodeTypes = [][]*Node{
 		b.gutNodes,
-		{b.skinNodes[0]},
 	}
 	cellTypes = []CellType{
 		Bacteroidota,
-		Bacteria,
 	}
 	counts = []int{
 		1, // Gut
-		5, // Skin
 	}
 	names := []string{
 		"Bacteroides",
-		"Clostridium tetani",
 	}
 
 	for i, nodes := range nodeTypes {
@@ -108,6 +104,38 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellTypes[i], nothing, "", [10]string{}, [10]string{})
 			}
+		}
+	}
+
+	// Infection test.
+	node := b.skinNodes[0]
+	cellTypes = []CellType{
+		Bacteria,
+	}
+	counts = []int{
+		5,
+	}
+	names = []string{
+		"Clostridium tetani",
+	}
+	for i, cellType := range cellTypes {
+		bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
+		for j := 0; j < counts[i]; j++ {
+			MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellType, nothing, "", [10]string{}, [10]string{})
+		}
+	}
+	// Immune cells.
+	cellTypes = []CellType{
+		Neutrocyte,
+		Macrophagocyte,
+	}
+	counts = []int{
+		0,
+		0,
+	}
+	for i, cellType := range cellTypes {
+		for j := 0; j < counts[i]; j++ {
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellType, nothing, "", [10]string{}, [10]string{})
 		}
 	}
 
