@@ -18,8 +18,12 @@ var HUMAN_DNA = DNAType(elliptic.P521())
 var BACTERIA_DNA = DNAType(elliptic.P384())
 var VIRUS_RNA = DNAType(elliptic.P224())
 
-var BACTERIA_MOLECULAR_MOTIF = MollecularPattern("3940200619")
-var VIRAL_MOLECULAR_MOTIF = MollecularPattern("26959946667")
+var BACTERIA_MOLECULAR_MOTIF = GetMollecularPattern(BACTERIA_DNA)
+var VIRAL_MOLECULAR_MOTIF = GetMollecularPattern(VIRUS_RNA)
+
+func GetMollecularPattern(dnaType DNAType) MollecularPattern {
+	return MollecularPattern(dnaType.Params().P.String()[0:10])
+}
 
 var DNATypeMap = map[int]DNAType{
 	521: HUMAN_DNA,
@@ -31,8 +35,8 @@ type DNA struct {
 	name         string
 	base         *ecdsa.PrivateKey
 	dnaType      DNAType
-	selfProteins map[Protein]bool
-	makeFunction func(c CellActor) *StateDiagram
+	selfProteins []Protein
+	makeFunction func(c CellActor, dna *DNA) *StateDiagram
 }
 type MHC_I *ecdsa.PublicKey
 type Protein uint16
@@ -105,7 +109,7 @@ func HashProteins(proteins []Protein) [32]byte {
 	return sha256.Sum256(b)
 }
 
-func (d *DNA) GenerateSelfProteins() map[Protein]bool {
+func (d *DNA) GenerateSelfProteins() []Protein {
 	hash := d.GenerateAntigen([]Protein{42}).signature
 	var proteins []Protein
 
@@ -113,16 +117,7 @@ func (d *DNA) GenerateSelfProteins() map[Protein]bool {
 		protein := Protein(binary.LittleEndian.Uint16(hash[i*2:]))
 		proteins = append(proteins, protein)
 	}
-
-	selfProteins := make(map[Protein]bool)
-	for _, protein := range proteins {
-		selfProteins[protein] = true
-	}
-	return selfProteins
-}
-
-func (d *DNA) GetMolecularMotif() MollecularPattern {
-	return MollecularPattern(d.dnaType.Params().P.String()[0:10])
+	return proteins
 }
 
 func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
@@ -131,15 +126,14 @@ func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mollecular_pattern := d.GetMolecularMotif()
 	return &Antigen{
 		proteins:           proteins,
 		signature:          signature,
-		mollecular_pattern: mollecular_pattern,
+		mollecular_pattern: GetMollecularPattern(d.dnaType),
 	}
 }
 
-func (d *DNA) Verify(a *ecdsa.PublicKey, m *Antigen) bool {
+func (d *DNA) VerifySelf(a *ecdsa.PublicKey, m *Antigen) bool {
 	hash := HashProteins(m.proteins)
 	return ecdsa.VerifyASN1(a, hash[:], m.signature)
 }

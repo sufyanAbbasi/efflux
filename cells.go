@@ -26,7 +26,7 @@ const (
 	Keratinocyte      // Skin Cell
 	Enterocyte        // Gut Lining Cell
 	Podocyte          // Kidney Cell
-	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast and Myeloblast
+	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast, Monoblast, and Myeloblast
 	Lymphoblast       // Stem Cell, becomes NK, B cells, T cells
 	Myeloblast        // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
 	Monoblast         // Stem Cell, becomes Macrophages and Dendritic cells
@@ -126,6 +126,11 @@ type CellActor interface {
 	ShouldTransport(context.Context) bool
 	Transport() bool
 	RecordTransport()
+	DropCytokine(t CytokineType, concentration uint8) uint8
+	AntibodyLoad() *AntibodyLoad
+	AddAntibodyLoad(*AntibodyLoad)
+	ViralLoad() *ViralLoad
+	AddViralLoad(*ViralLoad)
 }
 
 type Cell struct {
@@ -133,7 +138,6 @@ type Cell struct {
 	cellType      CellType
 	dna           *DNA
 	mhc_i         MHC_I
-	antigen       *Antigen
 	workType      WorkType
 	organ         *Node
 	resourceNeed  *ResourceBlob
@@ -145,6 +149,8 @@ type Cell struct {
 	transportPath [10]string
 	wantPath      [10]string
 	spawnTime     time.Time
+	antibodyLoad  *AntibodyLoad
+	viralLoad     *ViralLoad
 }
 
 func (c *Cell) String() string {
@@ -222,24 +228,20 @@ func (c *Cell) Repair(damage int) {
 	} else {
 		c.damage -= damage
 	}
-	if c.Verbose() {
-		// fmt.Println("Repaired:", c, "- damage", c.damage, "in", c.organ)
-	}
 }
 
 func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
+	hasAntibodies := c.antibodyLoad != nil && c.antibodyLoad.concentration > 0
 	waste := c.Organ().materialPool.GetWaste(ctx)
 	c.Organ().materialPool.PutWaste(waste)
-	return waste.creatinine >= DAMAGE_CREATININE_THRESHOLD ||
+	return hasAntibodies ||
+		waste.creatinine >= DAMAGE_CREATININE_THRESHOLD ||
 		waste.co2 >= DAMAGE_CO2_THRESHOLD ||
 		c.GetCytokineConcentrationAt(cytotoxins, c.Position()) > CYTOTOXIN_DAMAGE_THRESHOLD
 }
 
 func (c *Cell) IncurDamage(damage int) {
 	c.damage += int(damage)
-	if c.Verbose() {
-		// fmt.Println("Damaged:", c, "- damage", c.damage, "in", c.organ)
-	}
 }
 
 func (c *Cell) CleanUp() {
@@ -257,6 +259,13 @@ func (c *Cell) CleanUp() {
 func (c *Cell) Apoptosis() {
 	if c.Verbose() {
 		fmt.Println("Apoptosis:", c, "in", c.organ)
+	}
+	// Deposit viral load and proteins into protein pool.
+	if c.organ != nil && c.organ.proteinPool != nil {
+		if c.viralLoad != nil {
+			c.organ.proteinPool.DepositViralLoad(c.viralLoad)
+		}
+		go c.organ.proteinPool.DepositProteins(c.dna.selfProteins)
 	}
 	c.CleanUp()
 }
@@ -345,11 +354,8 @@ func (c *Cell) SampleProteins() (proteins []Protein) {
 	return
 }
 
-func (c *Cell) PresentAntigen(reset bool) *Antigen {
-	if reset || c.antigen == nil {
-		c.antigen = c.dna.GenerateAntigen(c.SampleProteins())
-	}
-	return c.antigen
+func (c *Cell) PresentAntigen() *Antigen {
+	return c.dna.GenerateAntigen(c.SampleProteins())
 }
 
 func (c *Cell) CollectResources(ctx context.Context) bool {
@@ -733,12 +739,38 @@ func (c *Cell) RecordTransport() {
 	c.wantPath = wantPath
 }
 
+func (c *Cell) AntibodyLoad() *AntibodyLoad {
+	return c.antibodyLoad
+}
+
+func (c *Cell) AddAntibodyLoad(a *AntibodyLoad) {
+	if c.antibodyLoad == nil {
+		c.antibodyLoad = &AntibodyLoad{
+			targetProtein: a.targetProtein,
+		}
+	}
+	c.antibodyLoad.Merge(a)
+}
+
+func (c *Cell) ViralLoad() *ViralLoad {
+	return c.viralLoad
+}
+
+func (c *Cell) AddViralLoad(v *ViralLoad) {
+	if c.viralLoad == nil {
+		c.viralLoad = &ViralLoad{
+			virus: v.virus,
+		}
+	}
+	c.viralLoad.Merge(v)
+}
+
 type EukaryoticCell struct {
 	*Cell
 }
 
 func (e *EukaryoticCell) Start(ctx context.Context) {
-	e.function = e.dna.makeFunction(e)
+	e.function = e.dna.makeFunction(e, e.dna)
 	go e.function.Run(ctx, e)
 	e.Tissue().Attach(e.render)
 }
@@ -844,7 +876,10 @@ func (e *EukaryoticCell) IsAerobic() bool {
 }
 
 func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X + RandInRange(-SPAWN_DISPLACEMENT, SPAWN_DISPLACEMENT),
+		base.render.position.Y + RandInRange(-SPAWN_DISPLACEMENT, SPAWN_DISPLACEMENT),
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &EukaryoticCell{
@@ -873,9 +908,17 @@ type Leukocyte struct {
 }
 
 type AntigenPresenting interface {
-	PresentAntigen(reset bool) *Antigen
+	PresentAntigen() *Antigen
 	SetDNA(*DNA)
 	DNA() *DNA
+}
+
+func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
+	return i.Cell.ShouldIncurDamage(ctx) && i.TimeLeft() < 0
+}
+
+func (i *Leukocyte) TimeLeft() time.Duration {
+	return time.Until(i.spawnTime.Add(i.lifeSpan))
 }
 
 func (i *Leukocyte) CanTransport() bool {
@@ -911,7 +954,7 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 		fallthrough
 	case Monoblast:
 		// Wait until the lifespan is over before moving on.
-		if time.Now().Before(i.spawnTime.Add(i.lifeSpan)) {
+		if i.TimeLeft() > 0 {
 			return false
 		}
 		// If there is no inflammation, move on.
@@ -925,12 +968,8 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 }
 
 func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
-	if c.PresentAntigen(false) == nil ||
-		!i.dna.Verify(i.mhc_i, c.PresentAntigen(false)) {
-		return false
-	} else {
-		return true
-	}
+	antigen := c.PresentAntigen()
+	return antigen != nil && i.dna.VerifySelf(i.mhc_i, antigen)
 }
 
 func (i *Leukocyte) Trap(c CellActor) {
@@ -994,12 +1033,16 @@ type LeukocyteStemCell struct {
 	*Leukocyte
 }
 
+func (l *LeukocyteStemCell) CanRepair() bool {
+	return false
+}
+
 func (l *LeukocyteStemCell) CanInteract() bool {
 	return false
 }
 
 func (l *LeukocyteStemCell) Start(ctx context.Context) {
-	l.function = l.dna.makeFunction(l)
+	l.function = l.dna.makeFunction(l, l.dna)
 	go l.function.Run(ctx, l)
 	l.Tissue().Attach(l.render)
 }
@@ -1021,7 +1064,10 @@ func (l *LeukocyteStemCell) BroadcastPosition(ctx context.Context) chan struct{}
 }
 
 func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &LeukocyteStemCell{
@@ -1059,11 +1105,11 @@ func (n *Neutrophil) ShouldIncurDamage(ctx context.Context) bool {
 }
 
 func (n *Neutrophil) CanRepair() bool {
-	return !n.inNETosis
+	return false
 }
 
 func (n *Neutrophil) Start(ctx context.Context) {
-	n.function = n.dna.makeFunction(n)
+	n.function = n.dna.makeFunction(n, n.dna)
 	go n.function.Run(ctx, n)
 	n.Tissue().Attach(n.render)
 }
@@ -1085,7 +1131,7 @@ func (n *Neutrophil) BroadcastPosition(ctx context.Context) chan struct{} {
 }
 
 func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
-	antigen := c.PresentAntigen(false)
+	antigen := c.PresentAntigen()
 	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
 		return
 	}
@@ -1099,9 +1145,10 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	//  3 - Neutrophil Extracellular Traps: Trap bacteria in a web of innards
 	//      made of DNA and toxins to keep them in place and cause damage. If
 	//      there is a high concentration of antigen_present cytokine, then
-	//      NETosis is triggered.
+	//      NETosis is triggered, or its nearing the end of its life.
 	antigenPresentConcentration := n.GetCytokineConcentrationAt(antigen_present, c.Position())
-	if !n.inNETosis && antigenPresentConcentration >= NEUTROPHIL_NETOSIS_THRESHOLD {
+	if !n.inNETosis && (antigenPresentConcentration >= NEUTROPHIL_NETOSIS_THRESHOLD ||
+		n.TimeLeft() < NEUTROPHIL_LIFE_SPAN/3) {
 		n.inNETosis = true
 	} else {
 		n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
@@ -1117,10 +1164,16 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	} else {
 		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 	}
+	n.Organ().materialPool.PutLigand(&LigandBlob{
+		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
+	})
 }
 
 func CopyNeutrophil(base *Neutrophil) *Neutrophil {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &Neutrophil{
@@ -1156,7 +1209,7 @@ type Macrophage struct {
 }
 
 func (m *Macrophage) Start(ctx context.Context) {
-	m.function = m.dna.makeFunction(m)
+	m.function = m.dna.makeFunction(m, m.dna)
 	go m.function.Run(ctx, m)
 	m.Tissue().Attach(m.render)
 }
@@ -1190,14 +1243,25 @@ func (m *Macrophage) DoWork(ctx context.Context) {
 
 	// Reduce inflammation if too much.
 	ligand := m.Organ().materialPool.GetLigand(ctx)
-	if ligand.inflammation > LIGAND_INFLAMMATION_MACROPHAGE_CONSUMPTION {
-		ligand.inflammation -= LIGAND_INFLAMMATION_MACROPHAGE_CONSUMPTION
+	if ligand.inflammation > MACROPHAGE_INFLAMMATION_CONSUMPTION {
+		ligand.inflammation -= MACROPHAGE_INFLAMMATION_CONSUMPTION
 	}
 	m.Organ().materialPool.PutLigand(ligand)
+
+	// Sample proteins for presentation.
+	proteins := m.Organ().proteinPool.SampleProteins(ctx, PROTEIN_SAMPLE_DURATION, PROTEIN_MAX_SAMPLES)
+
+	cellStressedConcentration := m.GetCytokineConcentrationAt(cell_stressed, m.Position())
+	if cellStressedConcentration > 0 {
+		proteins = append(proteins, m.Organ().proteinPool.SampleVirusProteins(MACROPHAGE_VIRUS_SAMPLE_RATE)...)
+	}
+	for _, protein := range proteins {
+		m.proteinSignatures[protein] = true
+	}
 }
 
 func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
-	antigen := c.PresentAntigen(false)
+	antigen := c.PresentAntigen()
 	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
 		return
 	}
@@ -1206,13 +1270,16 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	// present, they have to suppress the inflammation response.
 	m.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 	m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
-	m.Organ().materialPool.PutLigand(&LigandBlob{
-		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
-	})
-	m.Organ().materialPool.PutHormone(&HormoneBlob{
-		macrophage_csf:  HORMONE_MACROPHAGE_CSF_DROP,
-		granulocyte_csf: HORMONE_MACROPHAGE_CSF_DROP,
-	})
+	ligand := m.Organ().materialPool.GetLigand(ctx)
+	ligand.inflammation += LIGAND_INFLAMMATION_LEUKOCYTE
+	m.Organ().materialPool.PutLigand(ligand)
+	// If inflammation is high, promote leukocyte growth.
+	if ligand.inflammation > MACROPHAGE_PROMOTE_GROWTH_THRESHOLD {
+		m.Organ().materialPool.PutHormone(&HormoneBlob{
+			macrophage_csf:  HORMONE_MACROPHAGE_CSF_DROP,
+			granulocyte_csf: HORMONE_MACROPHAGE_CSF_DROP,
+		})
+	}
 	// Phagocytosis.
 	m.Trap(c)
 	c.IncurDamage(MAX_DAMAGE)
@@ -1223,7 +1290,10 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 }
 
 func CopyMacrophage(base *Macrophage) *Macrophage {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &Macrophage{
@@ -1248,6 +1318,7 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 			},
 			lifeSpan: base.lifeSpan,
 		},
+		proteinSignatures: make(map[Protein]bool),
 	}
 }
 
@@ -1256,7 +1327,7 @@ type NaturalKiller struct {
 }
 
 func (n *NaturalKiller) Start(ctx context.Context) {
-	n.function = n.dna.makeFunction(n)
+	n.function = n.dna.makeFunction(n, n.dna)
 	go n.function.Run(ctx, n)
 	n.Tissue().Attach(n.render)
 }
@@ -1278,7 +1349,7 @@ func (n *NaturalKiller) BroadcastPosition(ctx context.Context) chan struct{} {
 }
 
 func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
-	antigen := c.PresentAntigen(false)
+	antigen := c.PresentAntigen()
 	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
 		return
 	}
@@ -1289,7 +1360,10 @@ func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
 }
 
 func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &NaturalKiller{
@@ -1323,7 +1397,7 @@ type TCell struct {
 }
 
 func (t *TCell) Start(ctx context.Context) {
-	t.function = t.dna.makeFunction(t)
+	t.function = t.dna.makeFunction(t, t.dna)
 	go t.function.Run(ctx, t)
 	t.Tissue().Attach(t.render)
 }
@@ -1345,8 +1419,12 @@ func (t *TCell) BroadcastPosition(ctx context.Context) chan struct{} {
 }
 
 func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
+	selfProteinsMap := make(map[Protein]bool)
+	for _, protein := range dna.selfProteins {
+		selfProteinsMap[protein] = true
+	}
 	for i := 0; i < 65535; i++ {
-		_, isSelf := dna.selfProteins[Protein(i)]
+		_, isSelf := selfProteinsMap[Protein(i)]
 		if !isSelf {
 			proteins = append(proteins, Protein(i))
 		}
@@ -1355,7 +1433,10 @@ func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
 }
 
 func CopyTCell(base *TCell) *TCell {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &TCell{
@@ -1390,7 +1471,7 @@ type DendriticCell struct {
 }
 
 func (d *DendriticCell) Start(ctx context.Context) {
-	d.function = d.dna.makeFunction(d)
+	d.function = d.dna.makeFunction(d, d.dna)
 	go d.function.Run(ctx, d)
 	d.Tissue().Attach(d.render)
 }
@@ -1412,7 +1493,7 @@ func (d *DendriticCell) BroadcastPosition(ctx context.Context) chan struct{} {
 }
 
 func (d *DendriticCell) Collect(t AntigenPresenting) {
-	for _, p := range t.PresentAntigen(false).proteins {
+	for _, p := range t.PresentAntigen().proteins {
 		d.proteinSignatures[p] = false
 	}
 }
@@ -1426,7 +1507,10 @@ func (d *DendriticCell) FoundMatch(t *TCell) bool {
 }
 
 func CopyDendriticCell(base *DendriticCell) *DendriticCell {
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &DendriticCell{
@@ -1470,7 +1554,10 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 	default:
 		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
 	}
-	position := image.Point{base.render.position.X - 1, base.render.position.Y}
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &ProkaryoticCell{
@@ -1501,7 +1588,7 @@ func (p *ProkaryoticCell) Start(ctx context.Context) {
 	if tissue == nil {
 		return
 	}
-	p.function = p.dna.makeFunction(p)
+	p.function = p.dna.makeFunction(p, p.dna)
 	go p.function.Run(ctx, p)
 	tissue.Attach(p.render)
 }
@@ -1568,30 +1655,6 @@ func (p *ProkaryoticCell) IsAerobic() bool {
 		return true
 	}
 	return false
-}
-
-type Virus struct {
-	dna              *DNA
-	cellTypeToInfect CellType
-}
-
-func MakeVirus(dna *DNA, function *StateDiagram, cellTypeToInfect CellType) *Virus {
-	dna.makeFunction = ProduceVirus
-	return &Virus{
-		dna:              dna,
-		cellTypeToInfect: cellTypeToInfect,
-	}
-}
-
-func (v *Virus) InfectCell(c CellActor) {
-	if c.CellType() == v.cellTypeToInfect {
-		c.SetDNA(v.dna)
-		c.PresentAntigen(true)
-		function := c.Function()
-		if function != nil {
-			function.Graft(v.dna.makeFunction(c))
-		}
-	}
 }
 
 func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string) (cell CellActor) {

@@ -11,7 +11,9 @@ type CytokineType int
 
 const (
 	cell_damage CytokineType = iota
+	cell_stressed
 	antigen_present
+	virus_present
 	induce_chemotaxis
 	cytotoxins
 )

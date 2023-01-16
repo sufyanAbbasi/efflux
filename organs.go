@@ -287,6 +287,7 @@ type Node struct {
 	transportUrl string
 	managers     *sync.Map
 	materialPool *MaterialPool
+	proteinPool  *ProteinPool
 	tissue       *Tissue
 	verbose      bool
 }
@@ -315,6 +316,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string, verbose b
 		verbose:      verbose,
 	}
 	node.materialPool = InitializeMaterialPool(ctx)
+	node.proteinPool = InitializeProteinPool(ctx)
 	graph.allNodes[url] = node
 	node.Start(ctx)
 	go node.tissue.Start(ctx)

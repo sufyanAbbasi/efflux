@@ -6,21 +6,51 @@ import (
 
 func TestCellVerification(t *testing.T) {
 	bacteriaDNA := MakeDNA(BACTERIA_DNA, "E. Coli")
-	bacteria := MakeProkaryoticCell(bacteriaDNA, Bacteria)
+	bacteria := &ProkaryoticCell{
+		Cell: &Cell{
+			cellType: Bacteria,
+			dna:      bacteriaDNA,
+			mhc_i:    bacteriaDNA.MHC_I(),
+		},
+	}
 
 	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
 	virus := MakeVirus(virusRNA, nil, Pneumocyte)
 
 	humanDNA := MakeDNA(HUMAN_DNA, "Human 1")
-	humanCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+	humanCell := &EukaryoticCell{
+		Cell: &Cell{
+			cellType: Pneumocyte,
+			dna:      humanDNA,
+			mhc_i:    humanDNA.MHC_I(),
+		},
+	}
 
-	infectedHumanCell := MakeEukaryoticStemCell(humanDNA, Pneumocyte, 0)
+	infectedHumanCell := &EukaryoticCell{
+		Cell: &Cell{
+			cellType: Pneumocyte,
+			dna:      humanDNA,
+			mhc_i:    humanDNA.MHC_I(),
+		},
+	}
 	virus.InfectCell(infectedHumanCell)
 
-	tCell := MakeTCell(humanDNA, 0)
+	tCell := &Leukocyte{
+		Cell: &Cell{
+			cellType: Pneumocyte,
+			dna:      humanDNA,
+			mhc_i:    humanDNA.MHC_I(),
+		},
+	}
 
 	human2DNA := MakeDNA(HUMAN_DNA, "Human 2")
-	human2Cell := MakeEukaryoticStemCell(human2DNA, Pneumocyte, 0)
+	human2Cell := &EukaryoticCell{
+		Cell: &Cell{
+			cellType: Pneumocyte,
+			dna:      human2DNA,
+			mhc_i:    human2DNA.MHC_I(),
+		},
+	}
 
 	cases := []struct {
 		name      string

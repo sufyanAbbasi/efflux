@@ -113,7 +113,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Bacteria,
 	}
 	counts = []int{
-		5,
+		0,
 	}
 	names = []string{
 		"Clostridium tetani",
@@ -170,7 +170,7 @@ func GenerateBody(ctx context.Context) *Body {
 
 	// Left Arm
 	muscleLeftArm := InitializeNewNode(ctx, b.Graph, "Left Arm Muscle", false)
-	skinLeftArm := InitializeNewNode(ctx, b.Graph, "Left Arm Skin", true)
+	skinLeftArm := InitializeNewNode(ctx, b.Graph, "Left Arm Skin", false)
 	ConnectNodes(ctx, muscleLeftArm, skinLeftArm, muscular, muscular)
 	ConnectNodes(ctx, muscleLeftArm, brain, neuronal, neuronal)
 
@@ -206,7 +206,6 @@ func GenerateBody(ctx context.Context) *Body {
 	)
 
 	// Blood
-
 	bloodBrain := InitializeNewNode(ctx, b.Graph, "Blood - Brain", false)
 	ConnectNodes(ctx, bloodBrain, brain, blood_brain_barrier, blood_brain_barrier)
 	ConnectNodes(ctx, bloodBrain, lungLeft, muscular, cardiovascular)
@@ -272,7 +271,6 @@ func GenerateBody(ctx context.Context) *Body {
 	)
 
 	// Lymph Nodes
-
 	lymphHeart := InitializeNewNode(ctx, b.Graph, "Lymph Node - Heart", false)
 	ConnectNodes(ctx, lymphHeart, bloodHeart, cardiovascular, lymphatic)
 	ConnectNodes(ctx, lymphHeart, heart, muscular, lymphatic)

@@ -16,9 +16,9 @@ func TestSelfNodeInteraction(t *testing.T) {
 		allNodes: make(map[string]*Node),
 	}
 	ctx := context.Background()
-	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1 := InitializeNewNode(ctx, testGraph, "node1", false)
 	node1.materialPool = nil
-	ConnectNodes(ctx, node1, node1)
+	ConnectNodes(ctx, node1, node1, neuronal, neuronal)
 
 	testWorker1 := &TestWorker{
 		Cell: &Cell{
@@ -28,9 +28,9 @@ func TestSelfNodeInteraction(t *testing.T) {
 	node1.AddWorker(testWorker1)
 
 	// Signal availability.
-	node1.MakeAvailable(testWorker1)
+	node1.MakeAvailable(ctx, testWorker1)
 
-	result := node1.RequestWork(Work{
+	result := node1.RequestWork(ctx, Work{
 		workType: 12345,
 	})
 
@@ -51,11 +51,11 @@ func TestTwoNodeInteraction(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1 := InitializeNewNode(ctx, testGraph, "node1", false)
 	node1.materialPool = nil
-	node2 := InitializeNewNode(ctx, testGraph, "node2")
+	node2 := InitializeNewNode(ctx, testGraph, "node2", false)
 	node2.materialPool = nil
-	ConnectNodes(ctx, node1, node2)
+	ConnectNodes(ctx, node1, node1, neuronal, neuronal)
 
 	testWorker1 := &TestWorker{
 		Cell: &Cell{
@@ -71,10 +71,10 @@ func TestTwoNodeInteraction(t *testing.T) {
 	node2.AddWorker(testWorker2)
 
 	// Signal availability.
-	node1.MakeAvailable(testWorker1)
-	node2.MakeAvailable(testWorker2)
+	node1.MakeAvailable(ctx, testWorker1)
+	node2.MakeAvailable(ctx, testWorker2)
 
-	result := node1.RequestWork(Work{
+	result := node1.RequestWork(ctx, Work{
 		workType: 6789,
 	})
 
@@ -90,10 +90,10 @@ func TestTwoNodeInteraction(t *testing.T) {
 
 	fmt.Println()
 	// Signal availability again.
-	node1.MakeAvailable(testWorker1)
-	node2.MakeAvailable(testWorker2)
+	node1.MakeAvailable(ctx, testWorker1)
+	node2.MakeAvailable(ctx, testWorker2)
 
-	result = node2.RequestWork(Work{
+	result = node2.RequestWork(ctx, Work{
 		workType: 12345,
 	})
 
@@ -114,14 +114,14 @@ func TestThreeNodeInteraction(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node1 := InitializeNewNode(ctx, testGraph, "node1")
+	node1 := InitializeNewNode(ctx, testGraph, "node1", false)
 	node1.materialPool = nil
-	node2 := InitializeNewNode(ctx, testGraph, "node2")
+	node2 := InitializeNewNode(ctx, testGraph, "node2", false)
 	node2.materialPool = nil
-	node3 := InitializeNewNode(ctx, testGraph, "node3")
+	node3 := InitializeNewNode(ctx, testGraph, "node3", false)
 	node3.materialPool = nil
-	ConnectNodes(ctx, node1, node2)
-	ConnectNodes(ctx, node1, node3)
+	ConnectNodes(ctx, node1, node2, neuronal, neuronal)
+	ConnectNodes(ctx, node1, node3, neuronal, neuronal)
 
 	testWorker1 := &TestWorker{
 		Cell: &Cell{
@@ -142,11 +142,11 @@ func TestThreeNodeInteraction(t *testing.T) {
 	node2.AddWorker(testWorker2)
 	node3.AddWorker(TestWorker3)
 
-	node1.MakeAvailable(testWorker1)
-	node2.MakeAvailable(testWorker2)
-	node3.MakeAvailable(TestWorker3)
+	node1.MakeAvailable(ctx, testWorker1)
+	node2.MakeAvailable(ctx, testWorker2)
+	node3.MakeAvailable(ctx, TestWorker3)
 
-	result := node1.RequestWork(Work{
+	result := node1.RequestWork(ctx, Work{
 		workType: 12345,
 	})
 
@@ -167,7 +167,7 @@ func TestThreeNodeInteraction(t *testing.T) {
 	// Sleep to settle other threads
 	time.Sleep(time.Duration(100 * time.Millisecond))
 
-	result = node1.RequestWork(Work{
+	result = node1.RequestWork(ctx, Work{
 		workType: 12345,
 	})
 

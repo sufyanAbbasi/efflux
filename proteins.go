@@ -30,7 +30,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				return
 			case <-ticker.C:
 				if s.current != nil {
-					if hasOrganOrDie(ctx, cell) && s.current.function != nil {
+					if hasOrganOrCleanup(ctx, cell) && s.current.function != nil {
 						if !s.current.function.Run(ctx, cell) {
 							cancel()
 						}
@@ -49,11 +49,25 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 	}
 }
 
+func (s *StateDiagram) GetLastNode() *StateNode {
+	seen := map[*StateNode]bool{
+		s.root: true,
+	}
+	lastNode := s.root
+	for _, isLast := seen[lastNode.next]; !isLast && lastNode.next != nil; _, isLast = seen[lastNode.next] {
+		seen[lastNode] = true
+		lastNode = lastNode.next
+	}
+	return lastNode
+}
+
 func (s *StateDiagram) Graft(mutation *StateDiagram) {
 	s.Lock()
-	s.root = mutation.root
-	s.current = mutation.root
-	s.Unlock()
+	defer s.Unlock()
+	cellLast := s.GetLastNode()
+	mutationLast := mutation.GetLastNode()
+	mutationLast.next = cellLast.next
+	cellLast.next = mutation.root
 }
 
 type StateNode struct {
@@ -65,8 +79,8 @@ type StateNode struct {
 type CellAction func(ctx context.Context, cell CellActor) bool
 
 type ProteinFunction struct {
-	proteins []Protein
 	action   CellAction
+	proteins []Protein
 }
 
 func (p *ProteinFunction) Run(ctx context.Context, cell CellActor) bool {
@@ -75,10 +89,11 @@ func (p *ProteinFunction) Run(ctx context.Context, cell CellActor) bool {
 
 // General Actions
 
-func hasOrganOrDie(ctx context.Context, cell CellActor) bool {
+func hasOrganOrCleanup(ctx context.Context, cell CellActor) bool {
 	if cell.Organ() == nil {
 		fmt.Printf("Force killed: %v\n", cell)
-		return Apoptosis(ctx, cell)
+		defer cell.CleanUp()
+		return false
 	}
 	return true
 }
@@ -366,25 +381,22 @@ func ShouldTransport(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func GenerateRandomProteinPermutation(c CellActor) (proteins []Protein) {
+func GenerateRandomProteinPermutation(dna *DNA) (proteins []Protein) {
 	chooseN := len(proteins) / 3
 	permutations := rand.Perm(chooseN)
-	var allProteins []Protein
-	for protein := range c.DNA().selfProteins {
-		allProteins = append(allProteins, protein)
-	}
+	selfProteins := dna.selfProteins
 	for i := 0; i < chooseN; i++ {
-		proteins = append(proteins, allProteins[permutations[i]])
+		proteins = append(proteins, selfProteins[permutations[i]])
 	}
 	return
 }
 
-func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
+func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
 				action:   WillMitosisAndRepair,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		},
 	}
@@ -418,14 +430,14 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Expirate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Filtrate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -433,28 +445,28 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   BrainRequestPump,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Respirate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   BrainStimulateMuscles,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Respirate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -462,7 +474,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Flatulate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		for i := 3; i > 0; i-- {
@@ -471,14 +483,14 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   Respirate,
-					proteins: GenerateRandomProteinPermutation(c),
+					proteins: GenerateRandomProteinPermutation(dna),
 				},
 			}
 		}
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   CheckVitaminLevels,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -486,14 +498,14 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   MuscleFindFood,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   MuscleSeekSkinProtection,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -504,7 +516,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Respirate,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -521,7 +533,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,
-					proteins: GenerateRandomProteinPermutation(c),
+					proteins: GenerateRandomProteinPermutation(dna),
 				},
 			}
 			currNode = currNode.next
@@ -529,7 +541,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsAntigenPresentCytokineOrExplore,
-					proteins: GenerateRandomProteinPermutation(c),
+					proteins: GenerateRandomProteinPermutation(dna),
 				},
 			}
 			currNode = currNode.next
@@ -537,7 +549,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   Explore,
-					proteins: GenerateRandomProteinPermutation(c),
+					proteins: GenerateRandomProteinPermutation(dna),
 				},
 			}
 			currNode = currNode.next
@@ -547,7 +559,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Interact,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -556,7 +568,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   DoWork,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -565,7 +577,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   ShouldTransport,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -574,7 +586,7 @@ func MakeStateDiagramByEukaryote(c CellActor) *StateDiagram {
 		next: s.root, // Loop back.
 		function: &ProteinFunction{
 			action:   ShouldApoptosis,
-			proteins: GenerateRandomProteinPermutation(c),
+			proteins: GenerateRandomProteinPermutation(dna),
 		},
 	}
 	return s
@@ -634,12 +646,12 @@ func BacteriaShouldTransport(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
+func MakeStateDiagramByProkaryote(c CellActor, dna *DNA) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
 				action:   BacteriaWillMitosis,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		},
 	}
@@ -647,7 +659,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 	currNode.next = &StateNode{
 		function: &ProteinFunction{
 			action:   BacteriaConsume,
-			proteins: GenerateRandomProteinPermutation(c),
+			proteins: GenerateRandomProteinPermutation(dna),
 		},
 	}
 	currNode = currNode.next
@@ -655,7 +667,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   BacteriaMoveAwayFromCytokinesOrExplore,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -664,7 +676,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   BacteriaShouldTransport,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}
 		currNode = currNode.next
@@ -673,7 +685,7 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 		next: s.root, // Back to beginning.
 		function: &ProteinFunction{
 			action:   ShouldApoptosis,
-			proteins: GenerateRandomProteinPermutation(c),
+			proteins: GenerateRandomProteinPermutation(dna),
 		},
 	}
 	return s
@@ -682,21 +694,28 @@ func MakeStateDiagramByProkaryote(c CellActor) *StateDiagram {
 // Virus StateDiagrams
 
 func MakeVirusProtein(ctx context.Context, cell CellActor) bool {
-	// TODO: Implement this.
+	viralLoad := cell.ViralLoad()
+	viralLoad.Lock()
+	defer viralLoad.Unlock()
+	viralLoad.concentration++
+
+	if viralLoad.concentration >= MAX_VIRUS_CONCENTRATION {
+		return Apoptosis(ctx, cell)
+	}
 	return true
 }
 
 func ProduceInterferon(ctx context.Context, cell CellActor) bool {
-	// TODO: Implement this.
+	cell.DropCytokine(cell_stressed, CYTOKINE_CELL_STRESSED)
 	return true
 }
 
-func ProduceVirus(c CellActor) *StateDiagram {
+func ProduceVirus(c CellActor, dna *DNA) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{
 				action:   MakeVirusProtein,
-				proteins: GenerateRandomProteinPermutation(c),
+				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		},
 	}
@@ -704,7 +723,7 @@ func ProduceVirus(c CellActor) *StateDiagram {
 	currNode.next = &StateNode{
 		function: &ProteinFunction{
 			action:   ProduceInterferon,
-			proteins: GenerateRandomProteinPermutation(c),
+			proteins: GenerateRandomProteinPermutation(dna),
 		},
 		next: s.root,
 	}
