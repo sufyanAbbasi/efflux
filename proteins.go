@@ -43,7 +43,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				} else {
 					cancel()
 				}
-			case <-cell.BroadcastPosition(ctx):
+			case <-cell.BroadcastExistence(ctx):
 			}
 		}
 	}
@@ -195,7 +195,12 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 
 func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
 	if cell.ShouldIncurDamage(ctx) {
-		cell.IncurDamage(1)
+		antibodyCount := 0
+		antibodyLoad := cell.AntibodyLoad()
+		if antibodyLoad != nil {
+			antibodyCount = int(antibodyLoad.concentration)
+		}
+		cell.IncurDamage(1 + antibodyCount)
 	}
 	if cell.Damage() > MAX_DAMAGE {
 		Apoptosis(ctx, cell)
@@ -695,22 +700,32 @@ func MakeStateDiagramByProkaryote(c CellActor, dna *DNA) *StateDiagram {
 
 func MakeVirusProtein(ctx context.Context, cell CellActor) bool {
 	viralLoad := cell.ViralLoad()
+	if viralLoad == nil {
+		return true
+	}
 	viralLoad.Lock()
 	defer viralLoad.Unlock()
 	viralLoad.concentration++
 
 	if viralLoad.concentration >= MAX_VIRUS_CONCENTRATION {
+		fmt.Println(cell, "burst with", viralLoad.virus)
 		return Apoptosis(ctx, cell)
 	}
 	return true
 }
 
 func ProduceInterferon(ctx context.Context, cell CellActor) bool {
-	cell.DropCytokine(cell_stressed, CYTOKINE_CELL_STRESSED)
+	viralLoad := cell.ViralLoad()
+	if viralLoad == nil {
+		return true
+	}
+	if viralLoad.concentration%10 == 0 {
+		cell.DropCytokine(cell_stressed, CYTOKINE_CELL_STRESSED)
+	}
 	return true
 }
 
-func ProduceVirus(c CellActor, dna *DNA) *StateDiagram {
+func MakeStateDiagramByVirus(c CellActor, dna *DNA) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
 			function: &ProteinFunction{

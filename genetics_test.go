@@ -15,7 +15,10 @@ func TestCellVerification(t *testing.T) {
 	}
 
 	virusRNA := MakeDNA(VIRUS_RNA, "COVID-19")
-	virus := MakeVirus(virusRNA, nil, Pneumocyte)
+	virus := &Virus{
+		dna:            virusRNA,
+		targetCellType: Pneumocyte,
+	}
 
 	humanDNA := MakeDNA(HUMAN_DNA, "Human 1")
 	humanCell := &EukaryoticCell{

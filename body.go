@@ -99,8 +99,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
-			cellType := cellTypes[i]
-			bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
+			bacteriaDNA := MakeDNA(BACTERIA_DNA, names[i])
 			for j := 0; j < counts[i]; j++ {
 				MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellTypes[i], nothing, "", [10]string{}, [10]string{})
 			}
@@ -108,20 +107,37 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 
 	// Infection test.
-	node := b.skinNodes[0]
+	node := b.lungNodes[0]
+	node.verbose = true
 	cellTypes = []CellType{
 		Bacteria,
+		ViralLoadCarrier,
 	}
 	counts = []int{
 		0,
+		1,
 	}
 	names = []string{
 		"Clostridium tetani",
+		"SARS-COV-2",
 	}
+	dna := []*DNA{
+		MakeDNA(BACTERIA_DNA, names[0]),
+	}
+	virusDNA := MakeDNA(VIRUS_RNA, names[1])
+	targetCellType := Pneumocyte
+	for foundType := CellType(0); targetCellType != foundType; foundType = CopyViralLoadCarrier(&VirusCarrier{
+		Cell: &Cell{
+			dna: virusDNA,
+		},
+		virus: &Virus{},
+	}).virus.targetCellType {
+		virusDNA = MakeDNA(VIRUS_RNA, names[1])
+	}
+	dna = append(dna, virusDNA)
 	for i, cellType := range cellTypes {
-		bacteriaDNA := MakeDNA(BACTERIA_DNA, cellType.String())
 		for j := 0; j < counts[i]; j++ {
-			MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellType, nothing, "", [10]string{}, [10]string{})
+			MakeTransportRequest(node.transportUrl, names[i], dna[i], cellType, nothing, "", [10]string{}, [10]string{})
 		}
 	}
 	// Immune cells.

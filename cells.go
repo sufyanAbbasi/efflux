@@ -16,8 +16,8 @@ import (
 type CellType int
 
 const (
-	Bacteria     CellType = iota
-	Bacteroidota          // Bacteria that synthesize vitamins in the gut.
+	Bacteria     CellType = iota // A baseline prokaryotic cell.
+	Bacteroidota                 // Bacteria that synthesize vitamins in the gut.
 	RedBlood
 	Neuron
 	Cardiomyocyte     // Heart Cell
@@ -35,6 +35,7 @@ const (
 	NaturalKillerCell // Natural Killer Cells
 	TLymphocyte       // T Cell
 	Dendritic         // Dendritic Cells
+	ViralLoadCarrier  // A dummy cell that carries a virus. Always make sure this is last.
 )
 
 func (c CellType) String() string {
@@ -43,6 +44,8 @@ func (c CellType) String() string {
 		return "Bacteria"
 	case Bacteroidota:
 		return "Bacteroidota"
+	case ViralLoadCarrier:
+		return "ViralLoadCarrier"
 	case RedBlood:
 		return "RedBlood"
 	case Neuron:
@@ -92,12 +95,13 @@ type CellActor interface {
 	Organ() *Node
 	Verbose() bool
 	Tissue() *Tissue
+	Render() *Renderable
 	DoesWork() bool
 	DoWork(ctx context.Context)
 	Position() image.Point
 	LastPositions() *ring.Ring
 	GetUnvisitedPositions([]image.Point) []image.Point
-	BroadcastPosition(ctx context.Context) chan struct{}
+	BroadcastExistence(ctx context.Context) chan struct{}
 	SpawnTime() time.Time
 	Function() *StateDiagram
 	WillMitosis(context.Context) bool
@@ -131,6 +135,25 @@ type CellActor interface {
 	AddAntibodyLoad(*AntibodyLoad)
 	ViralLoad() *ViralLoad
 	AddViralLoad(*ViralLoad)
+}
+
+func BroadcastExistence(ctx context.Context, c CellActor) chan struct{} {
+	positionChan := make(chan struct{})
+	tissue := c.Tissue()
+	if tissue == nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case positionChan <- struct{}{}:
+			}
+		}()
+		return positionChan
+	}
+	go c.Tissue().BroadcastPosition(ctx, c, c.Render(), positionChan)
+	if c.Organ() != nil {
+		c.Organ().antigenPool.BroadcastExistence(c)
+	}
+	return positionChan
 }
 
 type Cell struct {
@@ -184,6 +207,10 @@ func (c *Cell) Tissue() *Tissue {
 		return nil
 	}
 	return c.organ.tissue
+}
+
+func (c *Cell) Render() *Renderable {
+	return c.render
 }
 
 func (c *Cell) DNA() *DNA {
@@ -261,11 +288,11 @@ func (c *Cell) Apoptosis() {
 		fmt.Println("Apoptosis:", c, "in", c.organ)
 	}
 	// Deposit viral load and proteins into protein pool.
-	if c.organ != nil && c.organ.proteinPool != nil {
+	if c.organ != nil && c.organ.antigenPool != nil {
 		if c.viralLoad != nil {
-			c.organ.proteinPool.DepositViralLoad(c.viralLoad)
+			c.organ.antigenPool.DepositViralLoad(c.viralLoad)
 		}
-		go c.organ.proteinPool.DepositProteins(c.dna.selfProteins)
+		go c.organ.antigenPool.DepositProteins(c.dna.selfProteins)
 	}
 	c.CleanUp()
 }
@@ -788,20 +815,8 @@ func (e *EukaryoticCell) SetOrgan(node *Node) {
 	e.organ.AddWorker(e)
 }
 
-func (e *EukaryoticCell) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := e.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go e.Tissue().BroadcastPosition(ctx, e, e.render, positionChan)
-	return positionChan
+func (e *EukaryoticCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, e)
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -1047,20 +1062,8 @@ func (l *LeukocyteStemCell) Start(ctx context.Context) {
 	l.Tissue().Attach(l.render)
 }
 
-func (l *LeukocyteStemCell) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := l.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go l.Tissue().BroadcastPosition(ctx, l, l.render, positionChan)
-	return positionChan
+func (l *LeukocyteStemCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, l)
 }
 
 func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
@@ -1114,20 +1117,8 @@ func (n *Neutrophil) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
-func (n *Neutrophil) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := n.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go n.Tissue().BroadcastPosition(ctx, n, n.render, positionChan)
-	return positionChan
+func (n *Neutrophil) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, n)
 }
 
 func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
@@ -1214,20 +1205,8 @@ func (m *Macrophage) Start(ctx context.Context) {
 	m.Tissue().Attach(m.render)
 }
 
-func (m *Macrophage) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := m.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go m.Tissue().BroadcastPosition(ctx, m, m.render, positionChan)
-	return positionChan
+func (m *Macrophage) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, m)
 }
 
 func (m *Macrophage) CanTransport() bool {
@@ -1249,11 +1228,11 @@ func (m *Macrophage) DoWork(ctx context.Context) {
 	m.Organ().materialPool.PutLigand(ligand)
 
 	// Sample proteins for presentation.
-	proteins := m.Organ().proteinPool.SampleProteins(ctx, PROTEIN_SAMPLE_DURATION, PROTEIN_MAX_SAMPLES)
+	proteins := m.Organ().antigenPool.SampleProteins(ctx, PROTEIN_SAMPLE_DURATION, PROTEIN_MAX_SAMPLES)
 
 	cellStressedConcentration := m.GetCytokineConcentrationAt(cell_stressed, m.Position())
 	if cellStressedConcentration > 0 {
-		proteins = append(proteins, m.Organ().proteinPool.SampleVirusProteins(MACROPHAGE_VIRUS_SAMPLE_RATE)...)
+		proteins = append(proteins, m.Organ().antigenPool.SampleVirusProteins(MACROPHAGE_VIRUS_SAMPLE_RATE)...)
 	}
 	for _, protein := range proteins {
 		m.proteinSignatures[protein] = true
@@ -1332,20 +1311,8 @@ func (n *NaturalKiller) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
-func (n *NaturalKiller) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := n.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go n.Tissue().BroadcastPosition(ctx, n, n.render, positionChan)
-	return positionChan
+func (n *NaturalKiller) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, n)
 }
 
 func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
@@ -1402,20 +1369,8 @@ func (t *TCell) Start(ctx context.Context) {
 	t.Tissue().Attach(t.render)
 }
 
-func (t *TCell) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := t.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go t.Tissue().BroadcastPosition(ctx, t, t.render, positionChan)
-	return positionChan
+func (t *TCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, t)
 }
 
 func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
@@ -1476,20 +1431,8 @@ func (d *DendriticCell) Start(ctx context.Context) {
 	d.Tissue().Attach(d.render)
 }
 
-func (d *DendriticCell) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := d.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go d.Tissue().BroadcastPosition(ctx, d, d.render, positionChan)
-	return positionChan
+func (d *DendriticCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, d)
 }
 
 func (d *DendriticCell) Collect(t AntigenPresenting) {
@@ -1605,20 +1548,8 @@ func (p *ProkaryoticCell) CanRepair() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) BroadcastPosition(ctx context.Context) chan struct{} {
-	positionChan := make(chan struct{})
-	tissue := p.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
-	}
-	go p.Tissue().BroadcastPosition(ctx, p, p.render, positionChan)
-	return positionChan
+func (p *ProkaryoticCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, p)
 }
 
 func (p *ProkaryoticCell) WillMitosis(context.Context) bool {
@@ -1657,6 +1588,70 @@ func (p *ProkaryoticCell) IsAerobic() bool {
 	return false
 }
 
+type VirusCarrier struct {
+	*Cell
+	virus *Virus
+}
+
+func CopyViralLoadCarrier(base *VirusCarrier) *VirusCarrier {
+	return &VirusCarrier{
+		Cell: &Cell{
+			cellType:      base.cellType,
+			dna:           base.dna,
+			mhc_i:         base.dna.MHC_I(),
+			render:        &Renderable{},
+			transportPath: base.transportPath,
+			wantPath:      base.wantPath,
+			spawnTime:     time.Now(),
+		},
+		virus: &Virus{
+			dna:            base.dna,
+			targetCellType: base.GetTargetCellType(base.dna),
+			infectivity:    base.GetInfectivity(base.dna),
+		},
+	}
+}
+
+func (v *VirusCarrier) GetTargetCellType(dna *DNA) CellType {
+	cellType := CellType(int(dna.selfProteins[len(dna.selfProteins)-1]) % int(ViralLoadCarrier))
+	return cellType
+}
+
+func (v *VirusCarrier) GetInfectivity(dna *DNA) int64 {
+	infectivity := int64(0)
+	for _, protein := range dna.selfProteins[1:] {
+		p := int64(protein)
+		if p > infectivity {
+			infectivity = p
+		}
+	}
+	return infectivity
+}
+
+func (v *VirusCarrier) Start(ctx context.Context) {
+	// Do nothing.
+}
+
+func (v *VirusCarrier) BroadcastExistence(ctx context.Context) chan struct{} {
+	return make(chan struct{})
+}
+
+func (v *VirusCarrier) DoesWork() bool {
+	return false
+}
+
+func (v *VirusCarrier) IsAerobic() bool {
+	return false
+}
+
+func (v *VirusCarrier) WillMitosis(ctx context.Context) bool {
+	return false
+}
+
+func (v *VirusCarrier) Mitosis(ctx context.Context) bool {
+	return false
+}
+
 func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string) (cell CellActor) {
 	switch cellType {
 	// Bacteria
@@ -1672,6 +1667,20 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				wantPath:      wantPath,
 				spawnTime:     time.Now(),
 			},
+		})
+	// Viral Load
+	case ViralLoadCarrier:
+		return CopyViralLoadCarrier(&VirusCarrier{
+			Cell: &Cell{
+				cellType:      cellType,
+				dna:           dna,
+				workType:      workType,
+				render:        render,
+				transportPath: transportPath,
+				wantPath:      wantPath,
+				spawnTime:     time.Now(),
+			},
+			virus: &Virus{},
 		})
 	// Leukocytes
 	case Lymphoblast:

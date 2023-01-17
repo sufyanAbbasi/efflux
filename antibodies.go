@@ -2,42 +2,109 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
 )
 
-type ProteinPool struct {
-	viralLoads  *sync.Map
-	proteinChan chan Protein
+type AntigenPool struct {
+	viralLoads     *sync.Map
+	antibodyLoads  *sync.Map
+	proteinChan    chan Protein
+	infectablePool *sync.Pool
 }
 
-func InitializeProteinPool(ctx context.Context) *ProteinPool {
-	proteinPool := &ProteinPool{
-		viralLoads:  &sync.Map{},
-		proteinChan: make(chan Protein, PROTEIN_CHAN_BUFFER),
+func InitializeAntigenPool(ctx context.Context) *AntigenPool {
+	antigenPool := &AntigenPool{
+		viralLoads:     &sync.Map{},
+		antibodyLoads:  &sync.Map{},
+		proteinChan:    make(chan Protein, PROTEIN_CHAN_BUFFER),
+		infectablePool: &sync.Pool{},
 	}
-	return proteinPool
+	go antigenPool.Start(ctx)
+	return antigenPool
 }
 
-func (p *ProteinPool) DepositViralLoad(v *ViralLoad) {
-	viralLoad, _ := p.viralLoads.LoadOrStore(v.virus, &ViralLoad{
+func (a *AntigenPool) Start(ctx context.Context) {
+	ticker := time.NewTicker(ANTIGEN_POOL_TICK_RATE)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.Tick()
+		}
+	}
+}
+
+func (a *AntigenPool) Tick() {
+	// Pick a victim to infect or attach antibodies.
+	infectable := a.infectablePool.Get()
+	var antibodyLoads []*AntibodyLoad
+	a.antibodyLoads.Range(func(_, a any) bool {
+		antibodyLoad := a.(*AntibodyLoad)
+		if infectable != nil {
+			c := infectable.(CellActor)
+			if antibodyLoad.ShouldAttach(c) {
+				antibodyLoad.Attach(c)
+			}
+		}
+		antibodyLoads = append(antibodyLoads, antibodyLoad)
+		return true
+	})
+	a.viralLoads.Range(func(_, v any) bool {
+		viralLoad := v.(*ViralLoad)
+		viralLoad.Tick(antibodyLoads)
+		if infectable != nil {
+			c := infectable.(CellActor)
+			if viralLoad.ShouldInfect(c) {
+				viralLoad.virus.InfectCell(c)
+			}
+		}
+		return true
+	})
+}
+
+func (a *AntigenPool) BroadcastExistence(c CellActor) {
+	a.infectablePool.Put(c)
+}
+
+func (a *AntigenPool) DepositViralLoad(v *ViralLoad) {
+	viralLoad, _ := a.viralLoads.LoadOrStore(&v.virus.dna.base.D, &ViralLoad{
 		virus:         v.virus,
 		concentration: 0,
 	})
 	viralLoad.(*ViralLoad).Merge(v)
 }
 
-func (p *ProteinPool) DepositProteins(proteins []Protein) {
+func (a *AntigenPool) DepositProteins(proteins []Protein) {
 	for i := 0; i < PROTEIN_DEPOSIT_RATE; i++ {
 		for _, protein := range proteins {
-			p.proteinChan <- protein
+			a.proteinChan <- protein
 		}
 	}
 }
 
-func (p *ProteinPool) SampleVirusProteins(sampleRate int64) (proteins []Protein) {
-	p.viralLoads.Range(func(_, v any) bool {
+func (a *AntigenPool) GetViralLoad() int {
+	viralLoadTotal := 0
+	a.viralLoads.Range(func(_, v any) bool {
+		viralLoad := v.(*ViralLoad)
+		viralLoad.RLock()
+		if int64(viralLoadTotal)+viralLoad.concentration > math.MaxInt {
+			viralLoadTotal = math.MaxInt
+		} else {
+			viralLoadTotal += int(viralLoad.concentration)
+		}
+		viralLoad.RUnlock()
+		return true
+	})
+	return viralLoadTotal
+}
+
+func (a *AntigenPool) SampleVirusProteins(sampleRate int64) (proteins []Protein) {
+	a.viralLoads.Range(func(_, v any) bool {
 		viralLoad := v.(*ViralLoad)
 		viralLoad.Lock()
 		if viralLoad.concentration > 0 {
@@ -54,14 +121,14 @@ func (p *ProteinPool) SampleVirusProteins(sampleRate int64) (proteins []Protein)
 	return
 }
 
-func (p *ProteinPool) SampleProteins(ctx context.Context, sampleDuration time.Duration, maxSamples int) (proteins []Protein) {
+func (a *AntigenPool) SampleProteins(ctx context.Context, sampleDuration time.Duration, maxSamples int) (proteins []Protein) {
 	ctx, cancel := context.WithTimeout(ctx, sampleDuration)
 	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case protein := <-p.proteinChan:
+		case protein := <-a.proteinChan:
 			proteins = append(proteins, protein)
 			maxSamples--
 			if maxSamples <= 0 {
@@ -84,6 +151,15 @@ func (a *AntibodyLoad) ShouldAttach(antigenPresentor AntigenPresenting) bool {
 			return true
 		}
 	}
+	return false
+}
+
+func (a *AntibodyLoad) Attach(cell CellActor) bool {
+	cell.AddAntibodyLoad(&AntibodyLoad{
+		targetProtein: a.targetProtein,
+		concentration: 1,
+	})
+	a.Deplete(1)
 	return false
 }
 
@@ -163,12 +239,8 @@ type Virus struct {
 	infectivity    int64
 }
 
-func MakeVirus(dna *DNA, function *StateDiagram, targetCellType CellType) *Virus {
-	dna.makeFunction = ProduceVirus
-	return &Virus{
-		dna:            dna,
-		targetCellType: targetCellType,
-	}
+func (v *Virus) String() string {
+	return fmt.Sprintf("Virus (%v)", v.dna.name)
 }
 
 func (v *Virus) SampleProteins() (proteins []Protein) {
@@ -203,5 +275,6 @@ func (v *Virus) InfectCell(c CellActor) {
 		if function != nil {
 			function.Graft(v.dna.makeFunction(c, v.dna))
 		}
+		fmt.Println("Virus: ", v.dna.name, "infected", c)
 	}
 }

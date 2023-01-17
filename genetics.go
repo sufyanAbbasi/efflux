@@ -88,6 +88,8 @@ func (d *DNA) Initialize() {
 		d.makeFunction = MakeStateDiagramByEukaryote
 	case BACTERIA_DNA:
 		d.makeFunction = MakeStateDiagramByProkaryote
+	case VIRUS_RNA:
+		d.makeFunction = MakeStateDiagramByVirus
 	}
 }
 
@@ -113,16 +115,28 @@ func (d *DNA) GenerateSelfProteins() []Protein {
 	hash := d.GenerateAntigen([]Protein{42}).signature
 	var proteins []Protein
 
-	for i := 0; i < len(hash)/2; i++ {
+	// Skip first two since they repeat.
+	for i := 2; i < len(hash)/2; i++ {
 		protein := Protein(binary.LittleEndian.Uint16(hash[i*2:]))
 		proteins = append(proteins, protein)
 	}
 	return proteins
 }
 
+func (d *DNA) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = 42
+	}
+	return len(p), nil
+}
+
 func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
 	hash := HashProteins(proteins)
-	signature, err := ecdsa.SignASN1(rand.Reader, d.base, hash[:])
+	// Generally, you would use rand.Reader as the first parameter to generate
+	// a sufficiently salted signature scheme, but we want to make sure that the
+	// protein signature generated every time is consistent so we use a dummy
+	// reader that always returns 42.
+	signature, err := ecdsa.SignASN1(d, d.base, hash[:])
 	if err != nil {
 		log.Fatal(err)
 	}

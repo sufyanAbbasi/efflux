@@ -109,6 +109,7 @@ type MaterialStatusData struct {
 	Inflammation int `json:"inflammation"`
 	G_CSF        int `json:"g_csf"`
 	M_CSF        int `json:"m_csf"`
+	VIRAL_LOAD   int `json:"viral_load"`
 }
 
 type TransportRequest struct {
@@ -202,17 +203,29 @@ func (n *Node) HandleTransportRequest(ctx context.Context, w http.ResponseWriter
 
 	cell, err := n.MakeCellFromRequest(request)
 	if err != nil {
+		log.Fatal(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	cell.SetOrgan(n)
-	cell.RecordTransport()
-	if n.verbose {
-		fmt.Println("Spawned:", cell, "in", cell.Organ())
+	if cell.CellType() == ViralLoadCarrier {
+		virusCarrier := cell.(*VirusCarrier)
+		n.antigenPool.DepositViralLoad(&ViralLoad{
+			virus:         virusCarrier.virus,
+			concentration: VIRAL_LOAD_CARRIER_CONCENTRATION,
+		})
+		if n.verbose {
+			fmt.Println("Viral load:", cell, "added to", n)
+		}
+	} else {
+		cell.SetOrgan(n)
+		cell.RecordTransport()
+		if n.verbose {
+			fmt.Println("Spawned:", cell, "in", cell.Organ())
+		}
+		ctx, stop := context.WithCancel(ctx)
+		cell.SetStop(stop)
+		cell.Start(ctx)
 	}
-	ctx, stop := context.WithCancel(ctx)
-	cell.SetStop(stop)
-	cell.Start(ctx)
 
 	fmt.Fprintf(w, "Success: Created %s", cell)
 }
@@ -287,7 +300,7 @@ type Node struct {
 	transportUrl string
 	managers     *sync.Map
 	materialPool *MaterialPool
-	proteinPool  *ProteinPool
+	antigenPool  *AntigenPool
 	tissue       *Tissue
 	verbose      bool
 }
@@ -316,7 +329,7 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string, verbose b
 		verbose:      verbose,
 	}
 	node.materialPool = InitializeMaterialPool(ctx)
-	node.proteinPool = InitializeProteinPool(ctx)
+	node.antigenPool = InitializeAntigenPool(ctx)
 	graph.allNodes[url] = node
 	node.Start(ctx)
 	go node.tissue.Start(ctx)
@@ -587,6 +600,7 @@ func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
 				G_CSF:        n.materialPool.hormonePool.hormones.granulocyte_csf,
 				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_csf,
+				VIRAL_LOAD:   n.antigenPool.GetViralLoad(),
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
