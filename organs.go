@@ -109,6 +109,7 @@ type MaterialStatusData struct {
 	Inflammation int `json:"inflammation"`
 	G_CSF        int `json:"g_csf"`
 	M_CSF        int `json:"m_csf"`
+	IL_3         int `json:"il_3"`
 	VIRAL_LOAD   int `json:"viral_load"`
 }
 
@@ -551,6 +552,7 @@ func (n *Node) ReceiveDiffusion(request Work) {
 	n.materialPool.PutHormone(&HormoneBlob{
 		granulocyte_csf: data.Hormone.GranulocyteColonyStimulatingFactor,
 		macrophage_csf:  data.Hormone.MacrophageColonyStimulatingFactor,
+		interleukin_3:   data.Hormone.Interleukin3,
 	})
 }
 
@@ -600,6 +602,7 @@ func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
 				G_CSF:        n.materialPool.hormonePool.hormones.granulocyte_csf,
 				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_csf,
+				IL_3:         n.materialPool.hormonePool.hormones.interleukin_3,
 				VIRAL_LOAD:   n.antigenPool.GetViralLoad(),
 			}
 			err := SendStatus(connection, StatusSocketData{
@@ -707,6 +710,7 @@ func (n *Node) SendDiffusion(ctx context.Context) {
 			Hormone: HormoneBlobData{
 				GranulocyteColonyStimulatingFactor: hormone.granulocyte_csf,
 				MacrophageColonyStimulatingFactor:  hormone.macrophage_csf,
+				Interleukin3:                       hormone.interleukin_3,
 			},
 		})
 		if err != nil {

@@ -26,10 +26,10 @@ const (
 	Keratinocyte      // Skin Cell
 	Enterocyte        // Gut Lining Cell
 	Podocyte          // Kidney Cell
-	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast, Monoblast, and Myeloblast
+	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
 	Lymphoblast       // Stem Cell, becomes NK, B cells, T cells
 	Myeloblast        // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
-	Monoblast         // Stem Cell, becomes Macrophages and Dendritic cells
+	Monocyte          // Stem Cell, becomes Macrophages and Dendritic cells
 	Macrophagocyte    // Macrophage
 	Neutrocyte        // Neutrophils
 	NaturalKillerCell // Natural Killer Cells
@@ -68,8 +68,8 @@ func (c CellType) String() string {
 		return "Lymphoblast"
 	case Myeloblast:
 		return "Myeloblast"
-	case Monoblast:
-		return "Monoblast"
+	case Monocyte:
+		return "Monocyte"
 	case Macrophagocyte:
 		return "Macrophagocyte"
 	case Neutrocyte:
@@ -374,7 +374,7 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	return request
 }
 
-func (c *Cell) SampleProteins() (proteins []Protein) {
+func (c *Cell) PresentProteins() (proteins []Protein) {
 	if c.function != nil && c.function.current != nil {
 		return c.function.current.function.proteins
 	}
@@ -382,7 +382,7 @@ func (c *Cell) SampleProteins() (proteins []Protein) {
 }
 
 func (c *Cell) PresentAntigen() *Antigen {
-	return c.dna.GenerateAntigen(c.SampleProteins())
+	return c.dna.GenerateAntigen(c.PresentProteins())
 }
 
 func (c *Cell) CollectResources(ctx context.Context) bool {
@@ -419,7 +419,7 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Myeloblast:
 		fallthrough
-	case Monoblast:
+	case Monocyte:
 		fallthrough
 	case Macrophagocyte:
 		fallthrough
@@ -481,7 +481,7 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Myeloblast:
 			fallthrough
-		case Monoblast:
+		case Monocyte:
 			fallthrough
 		case Macrophagocyte:
 			fallthrough
@@ -837,9 +837,11 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.Cell.IncurDamage(damage)
 	e.DropCytokine(cell_damage, CYTOKINE_CELL_DAMAGE)
-	e.Organ().materialPool.PutLigand(&LigandBlob{
-		inflammation: LIGAND_INFLAMMATION_CELL_DAMAGE,
-	})
+	if e.Organ() != nil {
+		e.Organ().materialPool.PutLigand(&LigandBlob{
+			inflammation: LIGAND_INFLAMMATION_CELL_DAMAGE,
+		})
+	}
 }
 
 func (e *EukaryoticCell) CleanUp() {
@@ -861,9 +863,12 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 		}
 		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), e.transportPath, e.wantPath)
 		}
-		// TODO: Differentiate into Lymphoblasts.
+		if hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD {
+			hormone.interleukin_3 -= HORMONE_IL3_THRESHOLD
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
+		}
 		e.organ.materialPool.PutHormone(hormone)
 		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
 	default:
@@ -920,6 +925,7 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 type Leukocyte struct {
 	*Cell
 	lifeSpan time.Duration
+	mhc_ii   map[Protein]bool
 }
 
 type AntigenPresenting interface {
@@ -942,14 +948,14 @@ func (i *Leukocyte) CanTransport() bool {
 		return true
 	case Myeloblast:
 		return true
-	case Monoblast:
+	case Monocyte:
 		return true
 	case Macrophagocyte:
 		return false
 	case Neutrocyte:
-		return false
+		return true
 	case NaturalKillerCell:
-		return false
+		return true
 	case TLymphocyte:
 		return true
 	case Dendritic:
@@ -960,30 +966,17 @@ func (i *Leukocyte) CanTransport() bool {
 }
 
 func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
-	switch i.cellType {
-	case Neutrocyte:
-		fallthrough
-	case Lymphoblast:
-		fallthrough
-	case Myeloblast:
-		fallthrough
-	case Monoblast:
-		// Wait until the lifespan is over before moving on.
-		if i.TimeLeft() > 0 {
-			return false
-		}
-		// If there is no inflammation, move on.
-		ligand := i.organ.materialPool.GetLigand(ctx)
-		defer i.organ.materialPool.PutLigand(ligand)
-		if ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD {
-			return true
-		}
+	// Wait until the lifespan is over before moving on.
+	if i.TimeLeft() > 0 {
+		return false
 	}
-	return false
+	// If there is no inflammation, move on.
+	ligand := i.organ.materialPool.GetLigand(ctx)
+	defer i.organ.materialPool.PutLigand(ligand)
+	return ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD
 }
 
-func (i *Leukocyte) CheckAntigen(c AntigenPresenting) bool {
-	antigen := c.PresentAntigen()
+func (i *Leukocyte) CheckAntigen(antigen *Antigen) bool {
 	return antigen != nil && i.dna.VerifySelf(i.mhc_i, antigen)
 }
 
@@ -1014,7 +1007,7 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 		fallthrough
 	case Myeloblast:
 		fallthrough
-	case Monoblast:
+	case Monocyte:
 		// If there is no inflammation, don't differentiate.
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
@@ -1036,12 +1029,40 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	case Myeloblast:
 		// Can differentiate into Neutrophil.
 		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
-	case Monoblast:
+	case Monocyte:
 		// Can differentiate into Macrophage and Dendritic cells.
 		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
 	}
 	// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 	return false
+}
+
+func (i *Leukocyte) IncreaseInflammation() {
+	i.Organ().materialPool.PutLigand(&LigandBlob{
+		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
+	})
+}
+
+func (i *Leukocyte) SampleProteins(ctx context.Context, shouldPresent bool) (proteins []Protein, foundSelf bool, foundOther bool) {
+	// Sample proteins for presentation.
+	proteins = i.Organ().antigenPool.SampleProteins(ctx, PROTEIN_SAMPLE_DURATION, PROTEIN_MAX_SAMPLES)
+	proteins = append(proteins, i.Organ().antigenPool.SampleVirusProteins(VIRUS_SAMPLE_RATE)...)
+
+	foundSelf = false
+	foundOther = false
+	for _, protein := range proteins {
+		for _, p := range i.dna.selfProteins {
+			if protein == p {
+				foundSelf = true
+			} else {
+				foundOther = true
+				if shouldPresent {
+					i.mhc_ii[protein] = true
+				}
+			}
+		}
+	}
+	return
 }
 
 type LeukocyteStemCell struct {
@@ -1094,6 +1115,7 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
 	}
 }
@@ -1155,9 +1177,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	} else {
 		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 	}
-	n.Organ().materialPool.PutLigand(&LigandBlob{
-		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
-	})
+	n.IncreaseInflammation()
 }
 
 func CopyNeutrophil(base *Neutrophil) *Neutrophil {
@@ -1188,6 +1208,7 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
 	}
 }
@@ -1196,7 +1217,6 @@ type MacrophageMode int
 
 type Macrophage struct {
 	*Leukocyte
-	proteinSignatures map[Protein]bool
 }
 
 func (m *Macrophage) Start(ctx context.Context) {
@@ -1219,23 +1239,32 @@ func (m *Macrophage) DoesWork() bool {
 }
 
 func (m *Macrophage) DoWork(ctx context.Context) {
-
-	// Reduce inflammation if too much.
-	ligand := m.Organ().materialPool.GetLigand(ctx)
-	if ligand.inflammation > MACROPHAGE_INFLAMMATION_CONSUMPTION {
-		ligand.inflammation -= MACROPHAGE_INFLAMMATION_CONSUMPTION
+	_, concentrations := m.GetNearestCytokines([]CytokineType{
+		cell_stressed,
+		antigen_present,
+	})
+	foundCytokine := false
+	for i := range concentrations {
+		for j := range concentrations[i] {
+			if concentrations[i][j] > 0 {
+				foundCytokine = true
+			}
+		}
 	}
-	m.Organ().materialPool.PutLigand(ligand)
-
-	// Sample proteins for presentation.
-	proteins := m.Organ().antigenPool.SampleProteins(ctx, PROTEIN_SAMPLE_DURATION, PROTEIN_MAX_SAMPLES)
-
-	cellStressedConcentration := m.GetCytokineConcentrationAt(cell_stressed, m.Position())
-	if cellStressedConcentration > 0 {
-		proteins = append(proteins, m.Organ().antigenPool.SampleVirusProteins(MACROPHAGE_VIRUS_SAMPLE_RATE)...)
+	if !foundCytokine {
+		// Reduce inflammation.
+		ligand := m.Organ().materialPool.GetLigand(ctx)
+		if ligand.inflammation > MACROPHAGE_INFLAMMATION_CONSUMPTION {
+			ligand.inflammation -= MACROPHAGE_INFLAMMATION_CONSUMPTION
+		}
+		m.Organ().materialPool.PutLigand(ligand)
 	}
-	for _, protein := range proteins {
-		m.proteinSignatures[protein] = true
+	_, foundSelf, _ := m.SampleProteins(ctx, true)
+	if foundSelf {
+		// Found a dead cell. Signal growth.
+		m.Organ().materialPool.PutLigand(&LigandBlob{
+			growth: MACROPHAGE_STIMULATE_CELL_GROWTH,
+		})
 	}
 }
 
@@ -1249,14 +1278,15 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	// present, they have to suppress the inflammation response.
 	m.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 	m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+	m.IncreaseInflammation()
 	ligand := m.Organ().materialPool.GetLigand(ctx)
-	ligand.inflammation += LIGAND_INFLAMMATION_LEUKOCYTE
-	m.Organ().materialPool.PutLigand(ligand)
+	defer m.Organ().materialPool.PutLigand(ligand)
 	// If inflammation is high, promote leukocyte growth.
 	if ligand.inflammation > MACROPHAGE_PROMOTE_GROWTH_THRESHOLD {
 		m.Organ().materialPool.PutHormone(&HormoneBlob{
-			macrophage_csf:  HORMONE_MACROPHAGE_CSF_DROP,
-			granulocyte_csf: HORMONE_MACROPHAGE_CSF_DROP,
+			macrophage_csf:  HORMONE_MACROPHAGE_DROP,
+			granulocyte_csf: HORMONE_MACROPHAGE_DROP,
+			interleukin_3:   HORMONE_MACROPHAGE_DROP,
 		})
 	}
 	// Phagocytosis.
@@ -1264,7 +1294,7 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	c.IncurDamage(MAX_DAMAGE)
 	// Pick up protein signatures for presentation.
 	for _, protein := range antigen.proteins {
-		m.proteinSignatures[protein] = true
+		m.mhc_ii[protein] = true
 	}
 }
 
@@ -1296,8 +1326,8 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
-		proteinSignatures: make(map[Protein]bool),
 	}
 }
 
@@ -1315,15 +1345,33 @@ func (n *NaturalKiller) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, n)
 }
 
+func (n *NaturalKiller) Execute(c CellActor) {
+	// Gracefully destroy cell without releasing viral load.
+	if c.ViralLoad() != nil {
+		c.ViralLoad().Lock()
+		c.ViralLoad().concentration = 0
+		c.ViralLoad().Unlock()
+	}
+	c.IncurDamage(MAX_DAMAGE + 10)
+	n.IncreaseInflammation()
+	fmt.Println(n, "hit the kill switch on", c)
+}
+
 func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
-	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
+	// If bacteria, the best we can do is signal that it is here.
+	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
+		n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		n.IncreaseInflammation()
 		return
 	}
-	n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
-	ligand := n.Organ().materialPool.GetLigand(ctx)
-	defer n.Organ().materialPool.PutLigand(ligand)
-	ligand.inflammation += LIGAND_INFLAMMATION_LEUKOCYTE
+	// Else, check that this cell is part of self, kill if not.
+	// Also kill if has antibodies.
+	hasAntibodies := c.AntibodyLoad() != nil && c.AntibodyLoad().concentration > 0
+	cell_damaged := c.Damage() > NATURAL_KILLER_DAMAGE_KILL_THRESHOLD
+	if !n.CheckAntigen(antigen) || hasAntibodies || cell_damaged {
+		n.Execute(c)
+	}
 }
 
 func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
@@ -1354,6 +1402,7 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
 	}
 }
@@ -1415,6 +1464,7 @@ func CopyTCell(base *TCell) *TCell {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
 		proteinReceptor: base.proteinReceptor,
 	}
@@ -1422,7 +1472,6 @@ func CopyTCell(base *TCell) *TCell {
 
 type DendriticCell struct {
 	*Leukocyte
-	proteinSignatures map[Protein]bool
 }
 
 func (d *DendriticCell) Start(ctx context.Context) {
@@ -1435,18 +1484,23 @@ func (d *DendriticCell) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, d)
 }
 
-func (d *DendriticCell) Collect(t AntigenPresenting) {
-	for _, p := range t.PresentAntigen().proteins {
-		d.proteinSignatures[p] = false
-	}
-}
-
 func (d *DendriticCell) FoundMatch(t *TCell) bool {
-	_, found := d.proteinSignatures[t.proteinReceptor]
+	_, found := d.mhc_ii[t.proteinReceptor]
 	if found {
-		d.proteinSignatures[t.proteinReceptor] = found
+		d.mhc_ii[t.proteinReceptor] = found
 	}
 	return found
+}
+
+func (d *DendriticCell) DoesWork() bool {
+	return true
+}
+
+func (d *DendriticCell) DoWork(ctx context.Context) {
+	_, _, foundOther := d.SampleProteins(ctx, true)
+	if foundOther {
+		d.IncreaseInflammation()
+	}
 }
 
 func CopyDendriticCell(base *DendriticCell) *DendriticCell {
@@ -1477,8 +1531,8 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
+			mhc_ii:   make(map[Protein]bool),
 		},
-		proteinSignatures: base.proteinSignatures,
 	}
 }
 
@@ -1687,7 +1741,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 		fallthrough
 	case Myeloblast:
 		fallthrough
-	case Monoblast:
+	case Monocyte:
 		cell = CopyLeukocyteStemCell(&LeukocyteStemCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -140,27 +141,28 @@ func Explore(ctx context.Context, cell CellActor) bool {
 }
 
 func MoveTowardsChemotaxisCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if rand.Intn(5) == 0 {
-		return Explore(ctx, cell)
-	} else if !cell.MoveTowardsCytokines([]CytokineType{induce_chemotaxis}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{induce_chemotaxis}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
 func MoveTowardsCellDamageCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if rand.Intn(5) == 0 {
+	if !cell.MoveTowardsCytokines([]CytokineType{cell_damage}) {
 		return Explore(ctx, cell)
-	} else if !cell.MoveTowardsCytokines([]CytokineType{cell_damage}) {
+	}
+	return true
+}
+
+func MoveTowardsCellStressCytokineOrExplore(ctx context.Context, cell CellActor) bool {
+	if !cell.MoveTowardsCytokines([]CytokineType{cell_stressed}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
 func MoveTowardsAntigenPresentCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if rand.Intn(5) == 0 {
-		return Explore(ctx, cell)
-	} else if !cell.MoveTowardsCytokines([]CytokineType{antigen_present}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{antigen_present}) {
 		return Explore(ctx, cell)
 	}
 	return true
@@ -172,11 +174,13 @@ func WillMitosisAndRepair(ctx context.Context, cell CellActor) bool {
 	defer cell.Organ().materialPool.PutResource(resource)
 	if cell.Damage() > 0 && cell.CanRepair() {
 		repair := resource.vitamins
-		if resource.vitamins >= cell.Damage() {
-			resource.vitamins -= cell.Damage()
-		} else {
-			resource.vitamins = 0
+		if repair > MAX_REPAIR {
+			repair = MAX_REPAIR
 		}
+		if repair > cell.Damage() {
+			repair = cell.Damage()
+		}
+		resource.vitamins -= repair
 		cell.Repair(repair)
 	}
 	// Also not all cells can reproduce, but for sake of simulation, they can.
@@ -419,7 +423,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		fallthrough
 	case Myeloblast:
 		fallthrough
-	case Monoblast:
+	case Monocyte:
 		fallthrough
 	case Macrophagocyte:
 		fallthrough
@@ -534,7 +538,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			fallthrough
 		case Myeloblast:
 			fallthrough
-		case Monoblast:
+		case Monocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,
@@ -546,6 +550,14 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsAntigenPresentCytokineOrExplore,
+					proteins: GenerateRandomProteinPermutation(dna),
+				},
+			}
+			currNode = currNode.next
+		case NaturalKillerCell:
+			currNode.next = &StateNode{
+				function: &ProteinFunction{
+					action:   MoveTowardsCellStressCytokineOrExplore,
 					proteins: GenerateRandomProteinPermutation(dna),
 				},
 			}
@@ -706,10 +718,13 @@ func MakeVirusProtein(ctx context.Context, cell CellActor) bool {
 	viralLoad.Lock()
 	defer viralLoad.Unlock()
 	viralLoad.concentration++
+	if viralLoad.concentration%INTERFERON_PRODUCTION_MOD == 0 {
+		cell.IncurDamage(int(math.Sqrt(float64(viralLoad.concentration))))
+	}
 
 	if viralLoad.concentration >= MAX_VIRUS_CONCENTRATION {
-		fmt.Println(cell, "burst with", viralLoad.virus)
-		return Apoptosis(ctx, cell)
+		fmt.Println(cell, "bursting with", viralLoad.virus)
+		cell.IncurDamage(int(math.Sqrt(float64(viralLoad.concentration))))
 	}
 	return true
 }
@@ -719,7 +734,7 @@ func ProduceInterferon(ctx context.Context, cell CellActor) bool {
 	if viralLoad == nil {
 		return true
 	}
-	if viralLoad.concentration%10 == 0 {
+	if viralLoad.concentration%INTERFERON_PRODUCTION_MOD == 0 {
 		cell.DropCytokine(cell_stressed, CYTOKINE_CELL_STRESSED)
 	}
 	return true

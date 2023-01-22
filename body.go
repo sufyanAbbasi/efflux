@@ -115,7 +115,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	counts = []int{
 		0,
-		1,
+		10,
 	}
 	names = []string{
 		"Clostridium tetani",
@@ -144,10 +144,12 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	cellTypes = []CellType{
 		Neutrocyte,
 		Macrophagocyte,
+		NaturalKillerCell,
 	}
 	counts = []int{
 		0,
-		0,
+		1,
+		3,
 	}
 	for i, cellType := range cellTypes {
 		for j := 0; j < counts[i]; j++ {

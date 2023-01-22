@@ -141,7 +141,7 @@ class Node {
         labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)}`);
+        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)} ${makePadding('il_3: ' + materialStatus.il_3)}`);
         labels.push(`${makePadding('viral_load: ' + materialStatus.viral_load)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
@@ -416,7 +416,7 @@ function getCellColor(id) {
         case 'Neutrophil':
             return 'yellow';
         case 'NaturalKiller':
-            return 'orange';
+            return 'lime';
         case 'TLymphocyte':
             return 'turquoise';
         case 'Dendritic':

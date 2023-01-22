@@ -36,7 +36,7 @@ func TestCellVerification(t *testing.T) {
 			mhc_i:    humanDNA.MHC_I(),
 		},
 	}
-	virus.InfectCell(infectedHumanCell)
+	virus.Infect(infectedHumanCell)
 
 	tCell := &Leukocyte{
 		Cell: &Cell{
@@ -59,11 +59,11 @@ func TestCellVerification(t *testing.T) {
 		name      string
 		got, want bool
 	}{
-		{"tCell", tCell.CheckAntigen(tCell), true},
-		{"humanCell", tCell.CheckAntigen(humanCell), true},
-		{"human2Cell", tCell.CheckAntigen(human2Cell), false},
-		{"bacteria", tCell.CheckAntigen(bacteria), false},
-		{"virus", tCell.CheckAntigen(infectedHumanCell), false},
+		{"tCell", tCell.CheckAntigen(tCell.PresentAntigen()), true},
+		{"humanCell", tCell.CheckAntigen(humanCell.PresentAntigen()), true},
+		{"human2Cell", tCell.CheckAntigen(human2Cell.PresentAntigen()), false},
+		{"bacteria", tCell.CheckAntigen(bacteria.PresentAntigen()), false},
+		{"virus", tCell.CheckAntigen(infectedHumanCell.PresentAntigen()), false},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -71,12 +71,12 @@ func TestCellVerification(t *testing.T) {
 		}
 	}
 
-	virus.InfectCell(humanCell)
+	virus.Infect(humanCell)
 	cases = []struct {
 		name      string
 		got, want bool
 	}{
-		{"humanCell", tCell.CheckAntigen(humanCell), false},
+		{"humanCell", tCell.CheckAntigen(humanCell.PresentAntigen()), false},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

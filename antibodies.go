@@ -60,7 +60,7 @@ func (a *AntigenPool) Tick() {
 		if infectable != nil {
 			c := infectable.(CellActor)
 			if viralLoad.ShouldInfect(c) {
-				viralLoad.virus.InfectCell(c)
+				viralLoad.virus.Infect(c)
 			}
 		}
 		return true
@@ -257,7 +257,7 @@ func (v *Virus) DNA() *DNA {
 	return v.dna
 }
 
-func (v *Virus) InfectCell(c CellActor) {
+func (v *Virus) Infect(c CellActor) {
 	if c.CellType() == v.targetCellType && c.ViralLoad() == nil {
 		c.AddViralLoad(&ViralLoad{
 			virus: v,
