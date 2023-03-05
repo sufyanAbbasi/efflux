@@ -141,7 +141,7 @@ class Node {
         labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)} ${makePadding('il_3: ' + materialStatus.il_3)}`);
+        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)} ${makePadding('il_3: ' + materialStatus.il_3)} ${makePadding('il_2: ' + materialStatus.il_2)}`);
         labels.push(`${makePadding('viral_load: ' + materialStatus.viral_load)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
@@ -404,7 +404,7 @@ function getCellColor(id) {
     const match = id.match(getCellType) || []
     switch (match[1]) {
         case 'Bacteria':
-            return 'seagreen';
+            return 'yellowgreen';
         case 'Bacteroidota':
             return 'forestgreen';
         case 'Lymphoblast':
@@ -419,8 +419,12 @@ function getCellColor(id) {
             return 'yellow';
         case 'NaturalKiller':
             return 'lime';
-        case 'TLymphocyte':
+        case 'VirginTLymphocyte':
             return 'turquoise';
+        case 'HelperTLymphocyte':
+            return 'mediumseagreen';
+        case 'KillerTLymphocyte':
+            return 'seagreen';
         case 'Dendritic':
             return 'teal';
         case 'RedBlood':

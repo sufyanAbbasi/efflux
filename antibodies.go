@@ -72,7 +72,7 @@ func (a *AntigenPool) BroadcastExistence(c CellActor) {
 }
 
 func (a *AntigenPool) DepositViralLoad(v *ViralLoad) {
-	viralLoad, _ := a.viralLoads.LoadOrStore(&v.virus.dna.base.D, &ViralLoad{
+	viralLoad, _ := a.viralLoads.LoadOrStore(v.virus.dna.base.D.Int64(), &ViralLoad{
 		virus:         v.virus,
 		concentration: 0,
 	})
@@ -200,9 +200,9 @@ func (v *ViralLoad) ShouldInfect(cell CellActor) bool {
 		v.virus.infectivity <= 0 {
 		return false
 	}
-	if v.concentration >= v.virus.infectivity*10 {
-		// Cap the odds at 1:10.
-		return rand.Intn(10) == 0
+	if v.concentration >= v.virus.infectivity*MAX_INFECTION_ODDS {
+		// Cap the odds.
+		return rand.Intn(MAX_INFECTION_ODDS) == 0
 	}
 	// Generate a random number within the infectivity range. If the generated
 	// number is less than or equal to the concentration, then the cell was
@@ -225,7 +225,7 @@ func (v *ViralLoad) Tick(antibodies []*AntibodyLoad) {
 }
 
 func (v *ViralLoad) Merge(viralLoad *ViralLoad) {
-	if viralLoad == nil || v.virus != viralLoad.virus {
+	if viralLoad == nil {
 		return
 	}
 	v.Lock()

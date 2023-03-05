@@ -83,6 +83,16 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			}
 		}
 	}
+	// Generate T Cells.
+	for i, mhc_ii := range GenerateTCell_MHCII_Groups(humanDNA) {
+		node := b.lymphNodes[i%len(b.lymphNodes)]
+		for j := 0; j < VIRGIN_TCELL_REDUNDANCY; j++ {
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, VirginTLymphocyte, nothing, "", [10]string{}, [10]string{}, mhc_ii)
+		}
+	}
+
+	// TODO: Generate B Cells.
+
 	// Generate Prokaryotic Cells
 	nodeTypes = [][]*Node{
 		b.gutNodes,
@@ -105,7 +115,6 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			}
 		}
 	}
-
 	// Infection test.
 	node := b.lungNodes[0]
 	node.verbose = true
@@ -149,8 +158,8 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	counts = []int{
 		0,
-		1,
-		3,
+		0,
+		0,
 		5,
 	}
 	for i, cellType := range cellTypes {
@@ -339,11 +348,14 @@ func GenerateBody(ctx context.Context) *Body {
 	ConnectNodes(ctx, boneLeftLeg, bloodLeftLeg, cardiovascular, skeletal)
 	boneRightLeg := InitializeNewNode(ctx, b.Graph, "Bone - Right Leg", false)
 	ConnectNodes(ctx, boneRightLeg, bloodRightLeg, cardiovascular, skeletal)
+	boneTorso := InitializeNewNode(ctx, b.Graph, "Bone - Torso", false)
+	ConnectNodes(ctx, boneTorso, bloodTorso, cardiovascular, skeletal)
 	b.boneNodes = append(b.boneNodes,
 		boneLeftArm,
 		boneRightArm,
 		boneLeftLeg,
 		boneRightLeg,
+		boneTorso,
 	)
 
 	// Gut

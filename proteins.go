@@ -391,9 +391,9 @@ func ShouldTransport(ctx context.Context, cell CellActor) bool {
 }
 
 func GenerateRandomProteinPermutation(dna *DNA) (proteins []Protein) {
-	chooseN := len(proteins) / 3
-	permutations := rand.Perm(chooseN)
 	selfProteins := dna.selfProteins
+	chooseN := len(selfProteins) / 3
+	permutations := rand.Perm(chooseN)
 	for i := 0; i < chooseN; i++ {
 		proteins = append(proteins, selfProteins[permutations[i]])
 	}
@@ -431,7 +431,11 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		fallthrough
 	case NaturalKillerCell:
 		fallthrough
-	case TLymphocyte:
+	case VirginTLymphocyte:
+		fallthrough
+	case HelperTLymphocyte:
+		fallthrough
+	case KillerTLymphocyte:
 		fallthrough
 	case Dendritic:
 		// Do nothing special.
@@ -533,6 +537,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	if c.CanMove() {
 		switch c.CellType() {
 		case Neutrocyte:
+			fallthrough
+		case VirginTLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,
@@ -543,6 +549,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		case Macrophagocyte:
 			fallthrough
 		case Dendritic:
+			fallthrough
+		case HelperTLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsAntigenPresentCytokineOrExplore,
@@ -552,7 +560,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			currNode = currNode.next
 		case NaturalKillerCell:
 			fallthrough
-		case TLymphocyte:
+		case KillerTLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsCellStressCytokineOrExplore,
@@ -726,9 +734,9 @@ func MakeVirusProtein(ctx context.Context, cell CellActor) bool {
 		cell.IncurDamage(int(math.Sqrt(float64(viralLoad.concentration))))
 	}
 
-	if viralLoad.concentration >= MAX_VIRUS_CONCENTRATION {
+	if viralLoad.concentration >= BURST_VIRUS_CONCENTRATION {
 		fmt.Println(cell, "bursting with", viralLoad.virus)
-		cell.IncurDamage(int(math.Sqrt(float64(viralLoad.concentration))))
+		cell.IncurDamage(MAX_DAMAGE)
 	}
 	return true
 }

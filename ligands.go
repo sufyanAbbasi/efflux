@@ -160,21 +160,24 @@ func (l *LigandBlob) Split() *LigandBlob {
 }
 
 type HormoneBlob struct {
-	granulocyte_csf int
-	macrophage_csf  int
-	interleukin_3   int
+	granulocyte_csf int // Produces Myeloblast.
+	macrophage_csf  int // Produces Monocyte.
+	interleukin_3   int // Produces Lymphoblast.
+	interleukin_2   int // Induces TCell mitosis.
 }
 
 type HormoneBlobData struct {
 	GranulocyteColonyStimulatingFactor int
 	MacrophageColonyStimulatingFactor  int
 	Interleukin3                       int
+	Interleukin2                       int
 }
 
 func (h *HormoneBlob) Add(hormone *HormoneBlob) {
 	h.granulocyte_csf += hormone.granulocyte_csf
 	h.macrophage_csf += hormone.macrophage_csf
 	h.interleukin_3 += hormone.interleukin_3
+	h.interleukin_2 += hormone.interleukin_2
 }
 
 func (h *HormoneBlob) Split() *HormoneBlob {
@@ -182,6 +185,7 @@ func (h *HormoneBlob) Split() *HormoneBlob {
 		granulocyte_csf: 0,
 		macrophage_csf:  0,
 		interleukin_3:   0,
+		interleukin_2:   0,
 	}
 	if h.granulocyte_csf > 1 {
 		offset := offset(h.granulocyte_csf)
@@ -197,6 +201,11 @@ func (h *HormoneBlob) Split() *HormoneBlob {
 		offset := offset(h.interleukin_3)
 		h.interleukin_3 /= 2
 		keep.interleukin_3 += h.interleukin_3 + offset
+	}
+	if h.interleukin_2 > 1 {
+		offset := offset(h.interleukin_2)
+		h.interleukin_2 /= 2
+		keep.interleukin_2 += h.interleukin_2 + offset
 	}
 	return keep
 }
@@ -421,6 +430,7 @@ func InitializeMaterialPool(ctx context.Context) *MaterialPool {
 				granulocyte_csf: SEED_GRANULOCYTE_COLONY_STIMULATING_FACTOR,
 				macrophage_csf:  SEED_MACROPHAGE_COLONY_STIMULATING_FACTOR,
 				interleukin_3:   SEED_INTERLEUKIN_3,
+				interleukin_2:   SEED_INTERLEUKIN_2,
 			},
 			hormoneChan: make(chan *HormoneBlob, POOL_SIZE),
 			wantChan:    make(chan struct{}, POOL_SIZE),
