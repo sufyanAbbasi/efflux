@@ -408,9 +408,11 @@ function getCellColor(id) {
         case 'Bacteroidota':
             return 'forestgreen';
         case 'Lymphoblast':
-        case 'Myeloblast':
-        case 'Monoblast':
             return 'purple';
+        case 'Myeloblast':
+            return 'rebeccapurple';
+        case 'Monocyte':
+            return 'mediumpurple';
         case 'Macrophagocyte':
             return 'coral';
         case 'Neutrophil':

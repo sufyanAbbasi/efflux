@@ -265,3 +265,22 @@ create a new socket connection between nodes. We'll use special worktypes,
 can use the `results` field to serialize the `ResourceBlob` and `WasteBlob`
 values. Diffusion requests that are sent to non-lymph and non-blood can be
 returned by diffusion back the other way.
+
+
+### Known (easy to explain) Inaccuracies
+Unfortunately, I can't perfectly simulate the immune system and need to make
+significant simplifying assumptions. Here are just a few of the easiest to
+explain: 
+
+- There are many cytokines, way too many for me to understand, let alone
+  program, so instead of programming every one of them and their many functions,
+  I picked a few key cytokines and gave them semantic names and shared them.
+  This way, its easier to track and program. 
+- Macrophages differentiate into multiple types (M1, M2 etc.) which have
+  different purposes: one is anti-inflammatory and tissue rebuilding while the 
+  other is pro-inflammatory and stimulate the immune system. In this simulation
+  we consider a single Macrophage type that does both roles simultaneously.
+- Monocytes differentiate into Macrophage and Dendritic Cells, but also have
+  different types that differentiate into specific kinds of cells based on
+  the cytokine environment: https://www.ahajournals.org/doi/full/10.1161/ATVBAHA.116.308198.
+  For this simulation, Monocytes don't do anything useful except differentiate.

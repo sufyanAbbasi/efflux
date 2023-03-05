@@ -126,15 +126,18 @@ type CellActor interface {
 	CanInteract() bool
 	GetInteractions(ctx context.Context) (interactions []CellActor)
 	Interact(ctx context.Context, c CellActor)
+	TransportPath() [10]string
+	WantPath() [10]string
+	WantEdgeType() []EdgeType
 	CanTransport() bool
 	ShouldTransport(context.Context) bool
-	Transport() bool
 	RecordTransport()
 	DropCytokine(t CytokineType, concentration uint8) uint8
 	AntibodyLoad() *AntibodyLoad
 	AddAntibodyLoad(*AntibodyLoad)
 	ViralLoad() *ViralLoad
 	AddViralLoad(*ViralLoad)
+	MHC_II() map[Protein]bool
 }
 
 func BroadcastExistence(ctx context.Context, c CellActor) chan struct{} {
@@ -689,12 +692,25 @@ func (c *Cell) ShouldTransport(context.Context) bool {
 	return false
 }
 
-func (c *Cell) Transport() bool {
+func (c *Cell) WantPath() [10]string {
+	return c.wantPath
+}
+
+func (c *Cell) WantEdgeType() []EdgeType {
+	return nil
+}
+
+func (c *Cell) TransportPath() [10]string {
+	return c.transportPath
+}
+
+func Transport(c CellActor) bool {
 	o := c.Organ()
 	if o == nil {
 		return false
 	}
 	var transportEdges []*Edge
+	wantEdges := c.WantEdgeType()
 	for _, e := range o.edges {
 		switch e.edgeType {
 		case blood_brain_barrier:
@@ -702,7 +718,16 @@ func (c *Cell) Transport() bool {
 		case neuronal:
 			// Pass
 		default:
-			transportEdges = append(transportEdges, e)
+			if len(wantEdges) > 0 {
+				for _, wantEdge := range wantEdges {
+					if wantEdge == e.edgeType {
+						fmt.Println("got here", c, e.edgeType, e.transportUrl)
+						transportEdges = append(transportEdges, e)
+					}
+				}
+			} else {
+				transportEdges = append(transportEdges, e)
+			}
 		}
 	}
 	if len(transportEdges) == 0 {
@@ -712,9 +737,11 @@ func (c *Cell) Transport() bool {
 	// Pick an edge from the want path if it exists, starting from the end.
 	foundIndex := -1
 	found := false
-	for i := len(c.wantPath) - 1; i >= 0 && !found; i-- {
+	wantPath := c.WantPath()
+	transportPath := c.TransportPath()
+	for i := len(wantPath) - 1; i >= 0 && !found; i-- {
 		for _, e := range transportEdges {
-			if c.wantPath[i] == e.transportUrl {
+			if wantPath[i] == e.transportUrl {
 				found = true
 				foundIndex = i
 			}
@@ -726,8 +753,8 @@ func (c *Cell) Transport() bool {
 		// Pick a random, valid edge to transport to.
 		edge = transportEdges[rand.Intn(len(transportEdges))]
 		hasBeen := false
-		for i := 0; i < len(c.transportPath) && !hasBeen; i++ {
-			if edge.transportUrl == c.transportPath[i] {
+		for i := 0; i < len(transportPath) && !hasBeen; i++ {
+			if edge.transportUrl == transportPath[i] {
 				hasBeen = true
 			}
 		}
@@ -736,7 +763,7 @@ func (c *Cell) Transport() bool {
 			edge = transportEdges[rand.Intn(len(transportEdges))]
 		}
 	}
-	err := MakeTransportRequest(edge.transportUrl, c.dna.name, c.dna, c.cellType, c.workType, string(c.render.id), c.transportPath, c.wantPath)
+	err := MakeTransportRequest(edge.transportUrl, c.DNA().name, c.DNA(), c.CellType(), c.WorkType(), string(c.Render().id), c.TransportPath(), c.WantPath(), c.MHC_II())
 	if err != nil {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
@@ -792,6 +819,10 @@ func (c *Cell) AddViralLoad(v *ViralLoad) {
 	c.viralLoad.Merge(v)
 }
 
+func (c *Cell) MHC_II() map[Protein]bool {
+	return nil
+}
+
 type EukaryoticCell struct {
 	*Cell
 }
@@ -830,7 +861,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 	if e.organ == nil {
 		return false
 	}
-	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath)
+	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath, e.MHC_II())
 	return true
 }
 
@@ -859,15 +890,15 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 		hormone := e.organ.materialPool.GetHormone(ctx)
 		if hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD {
 			hormone.granulocyte_csf -= HORMONE_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), e.transportPath, e.wantPath)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD {
 			hormone.interleukin_3 -= HORMONE_IL3_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
 		}
 		e.organ.materialPool.PutHormone(hormone)
 		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
@@ -934,6 +965,11 @@ type AntigenPresenting interface {
 	DNA() *DNA
 }
 
+func (i *Leukocyte) MHC_II() map[Protein]bool {
+	return i.mhc_ii
+
+}
+
 func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
 	return i.Cell.ShouldIncurDamage(ctx) && i.TimeLeft() < 0
 }
@@ -970,10 +1006,15 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 	if i.TimeLeft() > 0 {
 		return false
 	}
-	// If there is no inflammation, move on.
-	ligand := i.organ.materialPool.GetLigand(ctx)
-	defer i.organ.materialPool.PutLigand(ligand)
-	return ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD
+	switch i.cellType {
+	case Dendritic:
+		return true
+	default:
+		// If there is no inflammation, move on.
+		ligand := i.organ.materialPool.GetLigand(ctx)
+		defer i.organ.materialPool.PutLigand(ligand)
+		return ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD
+	}
 }
 
 func (i *Leukocyte) CheckAntigen(antigen *Antigen) bool {
@@ -1025,13 +1066,20 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	switch i.cellType {
 	case Lymphoblast:
 		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath, nil)
 	case Myeloblast:
 		// Can differentiate into Neutrophil.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, nil)
 	case Monocyte:
 		// Can differentiate into Macrophage and Dendritic cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath)
+		// There are specific conditions that detmermine whether to
+		// differentiate into a macrophage or dendritic cell. In this case, we
+		// flip a coin.
+		if rand.Intn(2) == 0 {
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, nil)
+		} else {
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), i.transportPath, i.wantPath, nil)
+		}
 	}
 	// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 	return false
@@ -1051,6 +1099,24 @@ func (i *Leukocyte) SampleProteins(ctx context.Context, shouldPresent bool) (pro
 	foundSelf = false
 	foundOther = false
 	for _, protein := range proteins {
+		for _, p := range i.dna.selfProteins {
+			if protein == p {
+				foundSelf = true
+			} else {
+				foundOther = true
+				if shouldPresent {
+					i.mhc_ii[protein] = true
+				}
+			}
+		}
+	}
+	return
+}
+
+func (i *Leukocyte) SampleAntigen(a *Antigen, shouldPresent bool) (proteins []Protein, foundSelf bool, foundOther bool) {
+	foundSelf = false
+	foundOther = false
+	for _, protein := range a.proteins {
 		for _, p := range i.dna.selfProteins {
 			if protein == p {
 				foundSelf = true
@@ -1115,7 +1181,7 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1208,7 +1274,7 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1326,7 +1392,7 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1402,14 +1468,105 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
+			mhc_ii:   base.mhc_ii,
+		},
+	}
+}
+
+type DendriticCell struct {
+	*Leukocyte
+}
+
+func (d *DendriticCell) Start(ctx context.Context) {
+	d.function = d.dna.makeFunction(d, d.dna)
+	go d.function.Run(ctx, d)
+	d.Tissue().Attach(d.render)
+}
+
+func (d *DendriticCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, d)
+}
+
+func (d *DendriticCell) DoesWork() bool {
+	return true
+}
+
+func (d *DendriticCell) DoWork(ctx context.Context) {
+	_, _, foundOther := d.SampleProteins(ctx, true)
+	if foundOther {
+		d.IncreaseInflammation()
+	}
+}
+
+func (d *DendriticCell) Interact(ctx context.Context, c CellActor) {
+	antigen := c.PresentAntigen()
+	// If bacteria, we can phagocytosis but only if it's at a damage threshold.
+	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
+		d.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		d.IncreaseInflammation()
+		if c.Damage() >= DENDRITIC_PHAGOCYTOSIS_DAMAGE_TRESHOLD {
+			c.IncurDamage(MAX_DAMAGE)
+			d.SampleAntigen(antigen, true)
+		}
+		return
+	}
+	switch c.CellType() {
+	case Macrophagocyte:
+		mhc_ii := c.MHC_II()
+		for p := range mhc_ii {
+			d.mhc_ii[p] = true
+		}
+	case TLymphocyte:
+		if t, ok := c.(*TCell); ok {
+			for p := range d.mhc_ii {
+				t.CheckMatch(p)
+			}
+		}
+	}
+}
+
+func (d *DendriticCell) WantEdgeType() []EdgeType {
+	if len(d.mhc_ii) > 0 {
+		return []EdgeType{lymphatic}
+	}
+	return nil
+}
+
+func CopyDendriticCell(base *DendriticCell) *DendriticCell {
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
+	return &DendriticCell{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: base.cellType,
+				dna:      base.dna,
+				mhc_i:    base.dna.MHC_I(),
+				workType: base.workType,
+				render: &Renderable{
+					id:            MakeRenderId(base.cellType.String()),
+					visible:       true,
+					position:      position,
+					targetX:       base.render.targetX,
+					targetY:       base.render.targetY,
+					targetZ:       base.render.targetZ,
+					lastPositions: positionTracker,
+				},
+				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
+			},
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
 
 type TCell struct {
 	*Leukocyte
-	proteinReceptor Protein
 }
 
 func (t *TCell) Start(ctx context.Context) {
@@ -1420,6 +1577,11 @@ func (t *TCell) Start(ctx context.Context) {
 
 func (t *TCell) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, t)
+}
+
+func (t *TCell) CheckMatch(protein Protein) bool {
+	_, found := t.mhc_ii[protein]
+	return found
 }
 
 func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
@@ -1464,74 +1626,7 @@ func CopyTCell(base *TCell) *TCell {
 				spawnTime:     time.Now(),
 			},
 			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
-		},
-		proteinReceptor: base.proteinReceptor,
-	}
-}
-
-type DendriticCell struct {
-	*Leukocyte
-}
-
-func (d *DendriticCell) Start(ctx context.Context) {
-	d.function = d.dna.makeFunction(d, d.dna)
-	go d.function.Run(ctx, d)
-	d.Tissue().Attach(d.render)
-}
-
-func (d *DendriticCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, d)
-}
-
-func (d *DendriticCell) FoundMatch(t *TCell) bool {
-	_, found := d.mhc_ii[t.proteinReceptor]
-	if found {
-		d.mhc_ii[t.proteinReceptor] = found
-	}
-	return found
-}
-
-func (d *DendriticCell) DoesWork() bool {
-	return true
-}
-
-func (d *DendriticCell) DoWork(ctx context.Context) {
-	_, _, foundOther := d.SampleProteins(ctx, true)
-	if foundOther {
-		d.IncreaseInflammation()
-	}
-}
-
-func CopyDendriticCell(base *DendriticCell) *DendriticCell {
-	position := image.Point{
-		base.render.position.X,
-		base.render.position.Y,
-	}
-	positionTracker := ring.New(POSITION_TRACKER_SIZE)
-	positionTracker.Value = position
-	return &DendriticCell{
-		Leukocyte: &Leukocyte{
-			Cell: &Cell{
-				cellType: base.cellType,
-				dna:      base.dna,
-				mhc_i:    base.dna.MHC_I(),
-				workType: base.workType,
-				render: &Renderable{
-					id:            MakeRenderId(base.cellType.String()),
-					visible:       true,
-					position:      position,
-					targetX:       base.render.targetX,
-					targetY:       base.render.targetY,
-					targetZ:       base.render.targetZ,
-					lastPositions: positionTracker,
-				},
-				transportPath: base.transportPath,
-				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
-			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   make(map[Protein]bool),
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1619,7 +1714,7 @@ func (p *ProkaryoticCell) Mitosis(ctx context.Context) bool {
 	if p.organ == nil {
 		return false
 	}
-	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), p.transportPath, p.wantPath)
+	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), p.transportPath, p.wantPath, nil)
 	return true
 }
 
@@ -1706,7 +1801,11 @@ func (v *VirusCarrier) Mitosis(ctx context.Context) bool {
 	return false
 }
 
-func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string) (cell CellActor) {
+func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string, mhc_ii_proteins []Protein) (cell CellActor) {
+	mhc_ii := make(map[Protein]bool)
+	for _, protein := range mhc_ii_proteins {
+		mhc_ii[protein] = true
+	}
 	switch cellType {
 	// Bacteria
 	case Bacteria:
@@ -1754,6 +1853,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: LEUKOCYTE_STEM_CELL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case Macrophagocyte:
@@ -1769,6 +1869,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: MACROPHAGE_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case Neutrocyte:
@@ -1784,6 +1885,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: NEUTROPHIL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case NaturalKillerCell:
@@ -1799,6 +1901,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: NATURALKILLER_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case TLymphocyte:
@@ -1814,6 +1917,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: TCELL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case Dendritic:
@@ -1829,6 +1933,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: DENDRITIC_CELL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
 			},
 		})
 	case RedBlood:

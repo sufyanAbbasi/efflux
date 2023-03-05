@@ -114,14 +114,15 @@ type MaterialStatusData struct {
 }
 
 type TransportRequest struct {
-	Name           string
-	Base           []byte
-	DNAType        int // Curve number, like elliptic.P384()
-	CellType       CellType
-	WorkType       WorkType
-	ParentRenderID string
-	TransportPath  [10]string
-	WantPath       [10]string
+	Name            string
+	Base            []byte
+	DNAType         int // Curve number, like elliptic.P384()
+	CellType        CellType
+	WorkType        WorkType
+	ParentRenderID  string
+	TransportPath   [10]string
+	WantPath        [10]string
+	MHC_II_Proteins []Protein
 }
 
 type EdgeType int
@@ -150,6 +151,7 @@ func MakeTransportRequest(
 	parentRenderID string,
 	transportPath [10]string,
 	wantPath [10]string,
+	mhc_ii map[Protein]bool,
 ) error {
 	dnaBase, err := dna.Serialize()
 	if err != nil {
@@ -161,15 +163,20 @@ func MakeTransportRequest(
 			dnaType = i
 		}
 	}
+	var mhc_ii_proteins []Protein
+	for protein := range mhc_ii {
+		mhc_ii_proteins = append(mhc_ii_proteins, protein)
+	}
 	jsonData, err := json.Marshal(TransportRequest{
-		Name:           name,
-		Base:           dnaBase,
-		DNAType:        dnaType,
-		CellType:       cellType,
-		WorkType:       workType,
-		ParentRenderID: parentRenderID,
-		TransportPath:  transportPath,
-		WantPath:       wantPath,
+		Name:            name,
+		Base:            dnaBase,
+		DNAType:         dnaType,
+		CellType:        cellType,
+		WorkType:        workType,
+		ParentRenderID:  parentRenderID,
+		TransportPath:   transportPath,
+		WantPath:        wantPath,
+		MHC_II_Proteins: mhc_ii_proteins,
 	})
 	if err != nil {
 		return fmt.Errorf("transport error: %v", err)
@@ -249,7 +256,7 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 			position: image.Point{RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS), RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS)},
 		}
 	}
-	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.TransportPath, request.WantPath), nil
+	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.TransportPath, request.WantPath, request.MHC_II_Proteins), nil
 }
 
 func SendWork(connection *Connection, request Work) {

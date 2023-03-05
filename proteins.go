@@ -385,7 +385,7 @@ func Interact(ctx context.Context, cell CellActor) bool {
 
 func ShouldTransport(ctx context.Context, cell CellActor) bool {
 	if cell.ShouldTransport(ctx) {
-		return !cell.Transport()
+		return !Transport(cell)
 	}
 	return true
 }
@@ -533,12 +533,6 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	if c.CanMove() {
 		switch c.CellType() {
 		case Neutrocyte:
-			fallthrough
-		case Lymphoblast:
-			fallthrough
-		case Myeloblast:
-			fallthrough
-		case Monocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,
@@ -547,6 +541,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			}
 			currNode = currNode.next
 		case Macrophagocyte:
+			fallthrough
+		case Dendritic:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsAntigenPresentCytokineOrExplore,
@@ -555,6 +551,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			}
 			currNode = currNode.next
 		case NaturalKillerCell:
+			fallthrough
+		case TLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsCellStressCytokineOrExplore,
@@ -562,6 +560,12 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 				},
 			}
 			currNode = currNode.next
+		case Lymphoblast:
+			fallthrough
+		case Myeloblast:
+			fallthrough
+		case Monocyte:
+			fallthrough
 		default:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
