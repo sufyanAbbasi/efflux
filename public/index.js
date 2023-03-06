@@ -142,7 +142,7 @@ class Node {
         labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
         labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
         labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)} ${makePadding('il_3: ' + materialStatus.il_3)} ${makePadding('il_2: ' + materialStatus.il_2)}`);
-        labels.push(`${makePadding('viral_load: ' + materialStatus.viral_load)}`);
+        labels.push(`${makePadding('viral_load: ' + materialStatus.viral_load)} ${makePadding('antibody_load: ' + materialStatus.antibody_load)}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
         if (this.active) {
@@ -415,6 +415,8 @@ function getCellColor(id) {
             return 'mediumpurple';
         case 'Macrophagocyte':
             return 'coral';
+        case 'Dendritic':
+            return 'teal';
         case 'Neutrophil':
             return 'yellow';
         case 'NaturalKiller':
@@ -425,8 +427,10 @@ function getCellColor(id) {
             return 'mediumseagreen';
         case 'KillerTLymphocyte':
             return 'seagreen';
-        case 'Dendritic':
-            return 'teal';
+        case 'KillerTLymphocyte':
+            return 'seagreen';
+        case 'BLymphocyte':
+            return 'lightsalmon';
         case 'RedBlood':
         case 'Neuron':
         case 'Cardiomyocyte':

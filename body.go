@@ -84,14 +84,20 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		}
 	}
 	// Generate T Cells.
-	for i, mhc_ii := range GenerateTCell_MHCII_Groups(humanDNA) {
+	for i, mhc_ii := range humanDNA.Generate_MHCII_Groups(VIRGIN_TCELL_COUNT) {
 		node := b.lymphNodes[i%len(b.lymphNodes)]
 		for j := 0; j < VIRGIN_TCELL_REDUNDANCY; j++ {
 			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, VirginTLymphocyte, nothing, "", [10]string{}, [10]string{}, mhc_ii)
 		}
 	}
 
-	// TODO: Generate B Cells.
+	// Generate B Cells.
+	for i, mhc_ii := range humanDNA.Generate_MHCII_Groups(BCELL_COUNT) {
+		node := b.boneNodes[i%len(b.boneNodes)]
+		for j := 0; j < BCELL_REDUNDANCY; j++ {
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, BLymphocyte, nothing, "", [10]string{}, [10]string{}, mhc_ii)
+		}
+	}
 
 	// Generate Prokaryotic Cells
 	nodeTypes = [][]*Node{

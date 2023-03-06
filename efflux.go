@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 )
@@ -22,6 +23,9 @@ func main() {
 	fs := http.FileServer(http.Dir("./public"))
 	server := &http.Server{Addr: ":3000", Handler: fs}
 
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	go func() {
 		log.Print("Listening on :3000...")
 		if err := server.ListenAndServe(); err != nil {

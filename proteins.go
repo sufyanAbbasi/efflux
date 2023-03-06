@@ -17,8 +17,6 @@ type StateDiagram struct {
 }
 
 func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
-	// Add a random delay to offset cells.
-	time.Sleep(time.Duration(rand.Float32()*100) * time.Millisecond)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ticker := time.NewTicker(CELL_CLOCK_RATE)
@@ -437,6 +435,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		fallthrough
 	case KillerTLymphocyte:
 		fallthrough
+	case BLymphocyte:
+		fallthrough
 	case Dendritic:
 		// Do nothing special.
 	case RedBlood:
@@ -539,6 +539,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		case Neutrocyte:
 			fallthrough
 		case VirginTLymphocyte:
+			fallthrough
+		case BLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,

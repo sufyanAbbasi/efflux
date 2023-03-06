@@ -9,6 +9,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	mathRand "math/rand"
+	"time"
 )
 
 type DNAType elliptic.Curve
@@ -150,4 +152,31 @@ func (d *DNA) GenerateAntigen(proteins []Protein) *Antigen {
 func (d *DNA) VerifySelf(a *ecdsa.PublicKey, m *Antigen) bool {
 	hash := HashProteins(m.proteins)
 	return ecdsa.VerifyASN1(a, hash[:], m.signature)
+}
+
+func (d *DNA) GenerateNonselfProteins() (proteins []Protein) {
+	selfProteinsMap := make(map[Protein]bool)
+	for _, protein := range d.selfProteins {
+		selfProteinsMap[protein] = true
+	}
+	for i := 0; i < 65535; i++ {
+		_, isSelf := selfProteinsMap[Protein(i)]
+		if !isSelf {
+			proteins = append(proteins, Protein(i))
+		}
+	}
+	return
+}
+
+func (d *DNA) Generate_MHCII_Groups(count int) (mhc_ii_groups []map[Protein]bool) {
+	for i := 0; i < count; i++ {
+		mhc_ii_groups = append(mhc_ii_groups, make(map[Protein]bool))
+	}
+	proteins := d.GenerateNonselfProteins()
+	mathRand.Seed(time.Now().UnixNano())
+	mathRand.Shuffle(len(proteins), func(i, j int) { proteins[i], proteins[j] = proteins[j], proteins[i] })
+	for i, protein := range proteins {
+		mhc_ii_groups[i%VIRGIN_TCELL_COUNT][protein] = true
+	}
+	return mhc_ii_groups
 }

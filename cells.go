@@ -31,12 +31,13 @@ const (
 	Myeloblast        // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
 	Monocyte          // Stem Cell, becomes Macrophages and Dendritic cells
 	Macrophagocyte    // Macrophage
+	Dendritic         // Dendritic Cells
 	Neutrocyte        // Neutrophils
-	NaturalKillerCell // Natural Killer Cells
+	NaturalKillerCell // Natural Killer Cell
 	VirginTLymphocyte // Virgin T Cell
 	HelperTLymphocyte // Helper T Cell
 	KillerTLymphocyte // Killer T Cell
-	Dendritic         // Dendritic Cells
+	BLymphocyte       // B Cell
 	ViralLoadCarrier  // A dummy cell that carries a virus. Always make sure this is last.
 )
 
@@ -74,6 +75,8 @@ func (c CellType) String() string {
 		return "Monocyte"
 	case Macrophagocyte:
 		return "Macrophagocyte"
+	case Dendritic:
+		return "Dendritic"
 	case Neutrocyte:
 		return "Neutrophil"
 	case NaturalKillerCell:
@@ -84,8 +87,8 @@ func (c CellType) String() string {
 		return "HelperTLymphocyte"
 	case KillerTLymphocyte:
 		return "KillerTLymphocyte"
-	case Dendritic:
-		return "Dendritic"
+	case BLymphocyte:
+		return "BLymphocyte"
 	}
 	return "Unknown"
 }
@@ -446,6 +449,8 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case KillerTLymphocyte:
 		fallthrough
+	case BLymphocyte:
+		fallthrough
 	case Dendritic:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
@@ -511,6 +516,8 @@ func (c *Cell) ProduceWaste() {
 		case HelperTLymphocyte:
 			fallthrough
 		case KillerTLymphocyte:
+			fallthrough
+		case BLymphocyte:
 			fallthrough
 		case Dendritic:
 			// No waste produced.
@@ -1027,6 +1034,8 @@ func (i *Leukocyte) CanTransport() bool {
 		return true
 	case KillerTLymphocyte:
 		return true
+	case BLymphocyte:
+		return false
 	case Dendritic:
 		return true
 	default:
@@ -1087,6 +1096,8 @@ func (i *Leukocyte) CanMove() bool {
 func (i *Leukocyte) CanInteract() bool {
 	switch i.cellType {
 	case VirginTLymphocyte:
+		fallthrough
+	case BLymphocyte:
 		return false
 	default:
 		return true
@@ -1408,11 +1419,6 @@ func (m *Macrophage) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, m)
 }
 
-func (m *Macrophage) CanTransport() bool {
-	// Too big to travel around freely.
-	return false
-}
-
 func (m *Macrophage) DoesWork() bool {
 	return true
 }
@@ -1599,7 +1605,7 @@ func (d *DendriticCell) DoWork(ctx context.Context) {
 	if foundOther {
 		d.IncreaseInflammation()
 	}
-	// Looking for Virgin T Cells to presen to, so draw them closer.
+	// Looking for Virgin T Cells to present to, so draw them closer.
 	if len(d.mhc_ii) > 0 {
 		d.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 	}
@@ -1678,11 +1684,6 @@ func (t *VirginTCell) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, t)
 }
 
-func (t *VirginTCell) CheckMatch(protein Protein) bool {
-	_, found := t.mhc_ii[protein]
-	return found
-}
-
 func (t *VirginTCell) ShouldActivate(d *DendriticCell) {
 	if len(d.activated) > 0 {
 		// Dendritic Cell has already activated a T cell.
@@ -1699,35 +1700,8 @@ func (t *VirginTCell) ShouldActivate(d *DendriticCell) {
 		t.Organ().materialPool.PutHormone(&HormoneBlob{
 			interleukin_2: HORMONE_TCELL_DROP,
 		})
-		fmt.Println("T Cell Activated in ", t.organ)
+		fmt.Println("T Cell activated in ", t.organ)
 	}
-}
-
-func GenerateTCellProteins(dna *DNA) (proteins []Protein) {
-	selfProteinsMap := make(map[Protein]bool)
-	for _, protein := range dna.selfProteins {
-		selfProteinsMap[protein] = true
-	}
-	for i := 0; i < 65535; i++ {
-		_, isSelf := selfProteinsMap[Protein(i)]
-		if !isSelf {
-			proteins = append(proteins, Protein(i))
-		}
-	}
-	return
-}
-
-func GenerateTCell_MHCII_Groups(dna *DNA) (mhc_ii_groups []map[Protein]bool) {
-	for i := 0; i < VIRGIN_TCELL_COUNT; i++ {
-		mhc_ii_groups = append(mhc_ii_groups, make(map[Protein]bool))
-	}
-	proteins := GenerateTCellProteins(dna)
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(proteins), func(i, j int) { proteins[i], proteins[j] = proteins[j], proteins[i] })
-	for i, protein := range proteins {
-		mhc_ii_groups[i%VIRGIN_TCELL_COUNT][protein] = true
-	}
-	return mhc_ii_groups
 }
 
 func CopyVirginTCell(base *VirginTCell) *VirginTCell {
@@ -1778,6 +1752,11 @@ func (t *HelperTCell) BroadcastExistence(ctx context.Context) chan struct{} {
 	return BroadcastExistence(ctx, t)
 }
 
+func (t *HelperTCell) DoWork(ctx context.Context) {
+	// Looking for B Cells to present to, so draw them closer.
+	t.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
+}
+
 func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
 	// If bacteria, the best we can do is signal that it is here.
@@ -1786,7 +1765,16 @@ func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 		t.IncreaseInflammation()
 		return
 	}
-	// TODO: interact with Macrophage and B Cells.
+	switch c.CellType() {
+	case Macrophagocyte:
+		if m, ok := c.(*Macrophage); ok {
+			m.activated = t.mhc_ii
+		}
+	case BLymphocyte:
+		if b, ok := c.(*BCell); ok {
+			b.ShouldActivate(t)
+		}
+	}
 }
 
 func CopyHelperTCell(base *HelperTCell) *HelperTCell {
@@ -1860,6 +1848,80 @@ func CopyKillerTCell(base *KillerTCell) *KillerTCell {
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &KillerTCell{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: base.cellType,
+				dna:      base.dna,
+				mhc_i:    base.dna.MHC_I(),
+				workType: base.workType,
+				render: &Renderable{
+					id:            MakeRenderId(base.cellType.String()),
+					visible:       true,
+					position:      position,
+					targetX:       base.render.targetX,
+					targetY:       base.render.targetY,
+					targetZ:       base.render.targetZ,
+					lastPositions: positionTracker,
+				},
+				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
+			},
+			lifeSpan:  base.lifeSpan,
+			mhc_ii:    base.mhc_ii,
+			activated: make(map[Protein]bool),
+		},
+	}
+}
+
+type BCell struct {
+	*Leukocyte
+}
+
+func (b *BCell) Start(ctx context.Context) {
+	b.function = b.dna.makeFunction(b, b.dna)
+	go b.function.Run(ctx, b)
+	b.Tissue().Attach(b.render)
+}
+
+func (b *BCell) BroadcastExistence(ctx context.Context) chan struct{} {
+	return BroadcastExistence(ctx, b)
+}
+
+func (b *BCell) DoWork(ctx context.Context) {
+	for protein, _ := range b.activated {
+		b.organ.antigenPool.DepositAntibodyLoad(&AntibodyLoad{
+			RWMutex:       sync.RWMutex{},
+			targetProtein: protein,
+			concentration: BCELL_ANTIBODY_PRODUCTION,
+		})
+	}
+}
+
+func (b *BCell) ShouldActivate(t *HelperTCell) {
+	if len(t.activated) > 0 {
+		// Helper T Cell has already activated a B cell.
+		return
+	}
+	for protein := range t.mhc_ii {
+		if _, found := b.mhc_ii[protein]; found {
+			b.activated[protein] = true
+			t.activated[protein] = true
+		}
+	}
+	if len(b.activated) > 0 {
+		fmt.Println("B Cell activated in ", t.organ)
+	}
+}
+
+func CopyBCell(base *BCell) *BCell {
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
+	return &BCell{
 		Leukocyte: &Leukocyte{
 			Cell: &Cell{
 				cellType: base.cellType,
@@ -2204,6 +2266,22 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: KILLER_TCELL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
+			},
+		})
+	case BLymphocyte:
+		cell = CopyBCell(&BCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     time.Now(),
+				},
+				lifeSpan: BCELL_LIFE_SPAN,
 				mhc_ii:   mhc_ii,
 			},
 		})

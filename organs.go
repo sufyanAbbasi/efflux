@@ -78,6 +78,7 @@ type DiffusionSocketData struct {
 	Resources ResourceBlobData
 	Waste     WasteBlobData
 	Hormone   HormoneBlobData
+	Antigen   AntigenBlobData
 }
 
 type StatusSocketData struct {
@@ -98,20 +99,21 @@ type WorkStatusData struct {
 }
 
 type MaterialStatusData struct {
-	O2           int `json:"o2"`
-	Glucose      int `json:"glucose"`
-	Vitamin      int `json:"vitamin"`
-	Co2          int `json:"co2"`
-	Creatinine   int `json:"creatinine"`
-	Growth       int `json:"growth"`
-	Hunger       int `json:"hunger"`
-	Asphyxia     int `json:"asphyxia"`
-	Inflammation int `json:"inflammation"`
-	G_CSF        int `json:"g_csf"`
-	M_CSF        int `json:"m_csf"`
-	IL_3         int `json:"il_3"`
-	IL_2         int `json:"il_2"`
-	Viral_Load   int `json:"viral_load"`
+	O2            int `json:"o2"`
+	Glucose       int `json:"glucose"`
+	Vitamin       int `json:"vitamin"`
+	Co2           int `json:"co2"`
+	Creatinine    int `json:"creatinine"`
+	Growth        int `json:"growth"`
+	Hunger        int `json:"hunger"`
+	Asphyxia      int `json:"asphyxia"`
+	Inflammation  int `json:"inflammation"`
+	G_CSF         int `json:"g_csf"`
+	M_CSF         int `json:"m_csf"`
+	IL_3          int `json:"il_3"`
+	IL_2          int `json:"il_2"`
+	Viral_Load    int `json:"viral_load"`
+	Antibody_Load int `json:"antibody_load"`
 }
 
 type TransportRequest struct {
@@ -563,6 +565,7 @@ func (n *Node) ReceiveDiffusion(request Work) {
 		interleukin_3:   data.Hormone.Interleukin3,
 		interleukin_2:   data.Hormone.Interleukin2,
 	})
+	n.antigenPool.PutDiffusionLoad(data.Antigen)
 }
 
 func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
@@ -600,20 +603,21 @@ func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 				return true
 			})
 			materialStatus := MaterialStatusData{
-				O2:           n.materialPool.resourcePool.resources.o2,
-				Glucose:      n.materialPool.resourcePool.resources.glucose,
-				Vitamin:      n.materialPool.resourcePool.resources.vitamins,
-				Co2:          n.materialPool.wastePool.wastes.co2,
-				Creatinine:   n.materialPool.wastePool.wastes.creatinine,
-				Growth:       n.materialPool.ligandPool.ligands.growth,
-				Hunger:       n.materialPool.ligandPool.ligands.hunger,
-				Asphyxia:     n.materialPool.ligandPool.ligands.asphyxia,
-				Inflammation: n.materialPool.ligandPool.ligands.inflammation,
-				G_CSF:        n.materialPool.hormonePool.hormones.granulocyte_csf,
-				M_CSF:        n.materialPool.hormonePool.hormones.macrophage_csf,
-				IL_3:         n.materialPool.hormonePool.hormones.interleukin_3,
-				IL_2:         n.materialPool.hormonePool.hormones.interleukin_2,
-				Viral_Load:   n.antigenPool.GetViralLoad(),
+				O2:            n.materialPool.resourcePool.resources.o2,
+				Glucose:       n.materialPool.resourcePool.resources.glucose,
+				Vitamin:       n.materialPool.resourcePool.resources.vitamins,
+				Co2:           n.materialPool.wastePool.wastes.co2,
+				Creatinine:    n.materialPool.wastePool.wastes.creatinine,
+				Growth:        n.materialPool.ligandPool.ligands.growth,
+				Hunger:        n.materialPool.ligandPool.ligands.hunger,
+				Asphyxia:      n.materialPool.ligandPool.ligands.asphyxia,
+				Inflammation:  n.materialPool.ligandPool.ligands.inflammation,
+				G_CSF:         n.materialPool.hormonePool.hormones.granulocyte_csf,
+				M_CSF:         n.materialPool.hormonePool.hormones.macrophage_csf,
+				IL_3:          n.materialPool.hormonePool.hormones.interleukin_3,
+				IL_2:          n.materialPool.hormonePool.hormones.interleukin_2,
+				Viral_Load:    n.antigenPool.GetViralLoad(),
+				Antibody_Load: n.antigenPool.GetAntibodyLoad(),
 			}
 			err := SendStatus(connection, StatusSocketData{
 				Status:         200,
@@ -723,6 +727,7 @@ func (n *Node) SendDiffusion(ctx context.Context) {
 				Interleukin3:                       hormone.interleukin_3,
 				Interleukin2:                       hormone.interleukin_2,
 			},
+			Antigen: n.antigenPool.GetDiffusionLoad(),
 		})
 		if err != nil {
 			log.Fatalln("Could not send diffusion data: ", err)
