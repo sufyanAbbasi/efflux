@@ -110,7 +110,7 @@ type CellActor interface {
 	Position() image.Point
 	LastPositions() *ring.Ring
 	GetUnvisitedPositions([]image.Point) []image.Point
-	BroadcastExistence(ctx context.Context) chan struct{}
+	BroadcastExistence(ctx context.Context)
 	SpawnTime() time.Time
 	Function() *StateDiagram
 	WillMitosis(context.Context) bool
@@ -149,23 +149,14 @@ type CellActor interface {
 	MHC_II() map[Protein]bool
 }
 
-func BroadcastExistence(ctx context.Context, c CellActor) chan struct{} {
-	positionChan := make(chan struct{})
+func BroadcastExistence(ctx context.Context, c CellActor) {
 	tissue := c.Tissue()
-	if tissue == nil {
-		go func() {
-			select {
-			case <-ctx.Done():
-			case positionChan <- struct{}{}:
-			}
-		}()
-		return positionChan
+	if tissue != nil {
+		tissue.BroadcastPosition(ctx, c, c.Render())
 	}
-	go c.Tissue().BroadcastPosition(ctx, c, c.Render(), positionChan)
 	if c.Organ() != nil {
 		c.Organ().antigenPool.BroadcastExistence(c)
 	}
-	return positionChan
 }
 
 type Cell struct {
@@ -439,6 +430,8 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Macrophagocyte:
 		fallthrough
+	case Dendritic:
+		fallthrough
 	case Neutrocyte:
 		fallthrough
 	case NaturalKillerCell:
@@ -450,8 +443,6 @@ func (c *Cell) ResetResourceNeed() {
 	case KillerTLymphocyte:
 		fallthrough
 	case BLymphocyte:
-		fallthrough
-	case Dendritic:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
 			glucose: 0,
@@ -507,6 +498,8 @@ func (c *Cell) ProduceWaste() {
 			fallthrough
 		case Macrophagocyte:
 			fallthrough
+		case Dendritic:
+			fallthrough
 		case Neutrocyte:
 			fallthrough
 		case NaturalKillerCell:
@@ -518,8 +511,6 @@ func (c *Cell) ProduceWaste() {
 		case KillerTLymphocyte:
 			fallthrough
 		case BLymphocyte:
-			fallthrough
-		case Dendritic:
 			// No waste produced.
 		case Bacteroidota:
 			c.organ.materialPool.PutWaste(&WasteBlob{
@@ -881,8 +872,8 @@ func (e *EukaryoticCell) SetOrgan(node *Node) {
 	e.organ.AddWorker(e)
 }
 
-func (e *EukaryoticCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, e)
+func (e *EukaryoticCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, e)
 }
 
 func (e *EukaryoticCell) PresentProteins() (proteins []Protein) {
@@ -1271,8 +1262,8 @@ func (l *LeukocyteStemCell) Start(ctx context.Context) {
 	l.Tissue().Attach(l.render)
 }
 
-func (l *LeukocyteStemCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, l)
+func (l *LeukocyteStemCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, l)
 }
 
 func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
@@ -1328,8 +1319,8 @@ func (n *Neutrophil) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
-func (n *Neutrophil) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, n)
+func (n *Neutrophil) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, n)
 }
 
 func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
@@ -1415,8 +1406,8 @@ func (m *Macrophage) Start(ctx context.Context) {
 	m.Tissue().Attach(m.render)
 }
 
-func (m *Macrophage) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, m)
+func (m *Macrophage) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, m)
 }
 
 func (m *Macrophage) DoesWork() bool {
@@ -1527,8 +1518,8 @@ func (n *NaturalKiller) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
-func (n *NaturalKiller) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, n)
+func (n *NaturalKiller) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, n)
 }
 
 func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
@@ -1592,8 +1583,8 @@ func (d *DendriticCell) Start(ctx context.Context) {
 	d.Tissue().Attach(d.render)
 }
 
-func (d *DendriticCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, d)
+func (d *DendriticCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, d)
 }
 
 func (d *DendriticCell) DoesWork() bool {
@@ -1680,8 +1671,8 @@ func (t *VirginTCell) Start(ctx context.Context) {
 	t.Tissue().Attach(t.render)
 }
 
-func (t *VirginTCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, t)
+func (t *VirginTCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, t)
 }
 
 func (t *VirginTCell) ShouldActivate(d *DendriticCell) {
@@ -1748,8 +1739,8 @@ func (t *HelperTCell) Start(ctx context.Context) {
 	t.Tissue().Attach(t.render)
 }
 
-func (t *HelperTCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, t)
+func (t *HelperTCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, t)
 }
 
 func (t *HelperTCell) DoWork(ctx context.Context) {
@@ -1821,8 +1812,8 @@ func (t *KillerTCell) Start(ctx context.Context) {
 	t.Tissue().Attach(t.render)
 }
 
-func (t *KillerTCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, t)
+func (t *KillerTCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, t)
 }
 
 func (t *KillerTCell) Interact(ctx context.Context, c CellActor) {
@@ -1884,8 +1875,8 @@ func (b *BCell) Start(ctx context.Context) {
 	b.Tissue().Attach(b.render)
 }
 
-func (b *BCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, b)
+func (b *BCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, b)
 }
 
 func (b *BCell) DoWork(ctx context.Context) {
@@ -2014,8 +2005,8 @@ func (p *ProkaryoticCell) CanRepair() bool {
 	return false
 }
 
-func (p *ProkaryoticCell) BroadcastExistence(ctx context.Context) chan struct{} {
-	return BroadcastExistence(ctx, p)
+func (p *ProkaryoticCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, p)
 }
 
 func (p *ProkaryoticCell) WillMitosis(context.Context) bool {
@@ -2098,8 +2089,8 @@ func (v *VirusCarrier) Start(ctx context.Context) {
 	// Do nothing.
 }
 
-func (v *VirusCarrier) BroadcastExistence(ctx context.Context) chan struct{} {
-	return make(chan struct{})
+func (v *VirusCarrier) BroadcastExistence(ctx context.Context) {
+	// Do nothing.
 }
 
 func (v *VirusCarrier) DoesWork() bool {

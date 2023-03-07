@@ -42,6 +42,27 @@ func (r *Renderable) SetVisible(visible bool) {
 	r.visible = visible
 }
 
+type InteractionPool struct {
+	sync.RWMutex
+	interactionMap map[RenderID]CellActor
+}
+
+func (p *InteractionPool) Put(r *Renderable, c CellActor) {
+	p.Lock()
+	defer p.Unlock()
+	p.interactionMap[r.id] = c
+}
+
+func (p *InteractionPool) Get() CellActor {
+	p.Lock()
+	defer p.Unlock()
+	for id, c := range p.interactionMap {
+		delete(p.interactionMap, id)
+		return c
+	}
+	return nil
+}
+
 type Tissue struct {
 	bounds        image.Rectangle
 	streamingChan chan chan RenderableData
@@ -76,7 +97,7 @@ func (t *Tissue) BuildTissue() {
 			},
 			attached:         make(map[RenderID]*Renderable),
 			cytokinesMap:     &sync.Map{},
-			interactionsChan: &sync.Map{},
+			interactionsPool: &sync.Map{},
 		}
 		curr.walls = curr.GenerateWalls(WALL_LINES, WALL_BOXES)
 		if curr.prev != nil {
@@ -235,21 +256,15 @@ func (t *Tissue) ConsumeCytokines(r *Renderable, cType CytokineType, consumption
 	return m.ConsumeCytokines(r.position, cType, consumptionRate)
 }
 
-func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Renderable, positionChan chan struct{}) {
+func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Renderable) {
 	m := t.FindMatrix(r)
 	if m == nil {
 		return
 	}
-	interactionChan, _ := m.interactionsChan.LoadOrStore(r.position, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
-	ctx, cancel := context.WithTimeout(ctx, BROADCAST_INTERACTION_TIMEOUT_SEC)
-	defer cancel()
-	select {
-	case <-ctx.Done():
-		positionChan <- struct{}{}
-		return
-	case interactionChan.(chan CellActor) <- cell:
-	}
-
+	pool, _ := m.interactionsPool.LoadOrStore(r.position, &InteractionPool{
+		interactionMap: map[RenderID]CellActor{},
+	})
+	pool.(*InteractionPool).Put(r, cell)
 }
 
 func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactions []CellActor) {
@@ -272,55 +287,23 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 		{x_minus, y_minus},
 		{x, y_minus},
 		{x_plus, y_minus}}
-	var interactionChans [9]chan CellActor
+	var interactionPools [9]*InteractionPool
 	for i, pt := range points {
-		interactionChan, _ := m.interactionsChan.LoadOrStore(pt, make(chan CellActor, INTERACTIONS_BUFFER_SIZE))
-		interactionChans[i] = interactionChan.(chan CellActor)
+		pool, _ := m.interactionsPool.LoadOrStore(pt, &InteractionPool{
+			interactionMap: map[RenderID]CellActor{},
+		})
+		interactionPools[i] = pool.(*InteractionPool)
 	}
-	ctx, cancel := context.WithTimeout(ctx, INTERACTION_TIMEOUT_SEC)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case cell := <-interactionChans[0]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[1]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[2]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[3]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[4]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[5]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[6]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[7]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
-			}
-		case cell := <-interactionChans[8]:
-			if !cell.IsApoptosis() {
-				interactions = append(interactions, cell)
+
+	for i, pool := range interactionPools {
+		if c := pool.Get(); c != nil {
+			if c.Render().position.Eq(points[i]) {
+				interactions = append(interactions, c)
+				pool.Put(c.Render(), c)
 			}
 		}
 	}
+	return
 }
 
 type Walls struct {
@@ -373,7 +356,7 @@ type ExtracellularMatrix struct {
 	attached         map[RenderID]*Renderable
 	render           *Renderable
 	cytokinesMap     *sync.Map
-	interactionsChan *sync.Map
+	interactionsPool *sync.Map
 }
 
 func (m *ExtracellularMatrix) ColorModel() color.Model {

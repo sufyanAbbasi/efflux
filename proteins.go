@@ -42,7 +42,8 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				} else {
 					cancel()
 				}
-			case <-cell.BroadcastExistence(ctx):
+			default:
+				cell.BroadcastExistence(ctx)
 			}
 		}
 	}
