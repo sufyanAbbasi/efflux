@@ -146,7 +146,7 @@ type CellActor interface {
 	AddAntibodyLoad(*AntibodyLoad)
 	ViralLoad() *ViralLoad
 	AddViralLoad(*ViralLoad)
-	MHC_II() map[Protein]bool
+	MHC_II() *MHC_II
 }
 
 func BroadcastExistence(ctx context.Context, c CellActor) {
@@ -789,7 +789,7 @@ func Transport(c CellActor) bool {
 			edge = transportEdges[rand.Intn(len(transportEdges))]
 		}
 	}
-	err := MakeTransportRequest(edge.transportUrl, c.DNA().name, c.DNA(), c.CellType(), c.WorkType(), string(c.Render().id), c.TransportPath(), c.WantPath(), c.MHC_II())
+	err := MakeTransportRequest(edge.transportUrl, c.DNA().name, c.DNA(), c.CellType(), c.WorkType(), string(c.Render().id), c.TransportPath(), c.WantPath(), c.MHC_II().proteins)
 	if err != nil {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
@@ -845,8 +845,11 @@ func (c *Cell) AddViralLoad(v *ViralLoad) {
 	c.viralLoad.Merge(v)
 }
 
-func (c *Cell) MHC_II() map[Protein]bool {
-	return nil
+func (c *Cell) MHC_II() *MHC_II {
+	return &MHC_II{
+		proteins:  map[Protein]bool{},
+		presented: map[Protein]bool{},
+	}
 }
 
 type EukaryoticCell struct {
@@ -887,7 +890,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 	if e.organ == nil {
 		return false
 	}
-	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath, e.MHC_II())
+	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath, map[Protein]bool{})
 	return true
 }
 
@@ -906,7 +909,6 @@ func (e *EukaryoticCell) CleanUp() {
 	if e.organ != nil {
 		e.organ.RemoveWorker(e)
 	}
-	// TODO: make sure this gets garbage collected.
 }
 
 func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
@@ -979,11 +981,63 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 	}
 }
 
+type MHC_II struct {
+	sync.RWMutex
+	proteins  map[Protein]bool
+	presented map[Protein]bool
+}
+
+func (m *MHC_II) Get(protein Protein) bool {
+	m.RLock()
+	defer m.RUnlock()
+	_, found := m.proteins[protein]
+	return found
+}
+
+func (m *MHC_II) GetProteins() (proteins []Protein) {
+	m.RLock()
+	defer m.RUnlock()
+	for p := range m.proteins {
+		proteins = append(proteins, p)
+	}
+	return
+}
+
+func (m *MHC_II) SetProteins(proteins []Protein) {
+	m.Lock()
+	defer m.Unlock()
+	for _, p := range proteins {
+		m.proteins[p] = true
+	}
+}
+
+func (m *MHC_II) GetPresented() (proteins []Protein) {
+	m.RLock()
+	defer m.RUnlock()
+	for p := range m.presented {
+		proteins = append(proteins, p)
+	}
+	return
+}
+
+func (m *MHC_II) SetPresented(proteins []Protein) {
+	m.Lock()
+	defer m.Unlock()
+	for _, p := range proteins {
+		m.presented[p] = true
+	}
+}
+
+func (m *MHC_II) ClearPresented() {
+	m.Lock()
+	defer m.Unlock()
+	m.presented = map[Protein]bool{}
+}
+
 type Leukocyte struct {
 	*Cell
-	lifeSpan  time.Duration
-	mhc_ii    map[Protein]bool
-	activated map[Protein]bool
+	lifeSpan time.Duration
+	mhc_ii   *MHC_II
 }
 
 type AntigenPresenting interface {
@@ -992,9 +1046,8 @@ type AntigenPresenting interface {
 	DNA() *DNA
 }
 
-func (i *Leukocyte) MHC_II() map[Protein]bool {
+func (i *Leukocyte) MHC_II() *MHC_II {
 	return i.mhc_ii
-
 }
 
 func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
@@ -1043,7 +1096,7 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 	case Dendritic:
 		// If the dendritic cell was activated, it should not transport,
 		// and opt to die instead: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3282617/
-		return len(i.activated) == 0
+		return len(i.mhc_ii.presented) == 0
 	default:
 		// If there is no inflammation, move on.
 		ligand := i.organ.materialPool.GetLigand(ctx)
@@ -1061,7 +1114,7 @@ func (i *Leukocyte) IsAntigen(antigen *Antigen) bool {
 		return false
 	}
 	for _, protein := range antigen.proteins {
-		if _, found := i.mhc_ii[protein]; found {
+		if i.mhc_ii.Get(protein) {
 			return true
 		}
 	}
@@ -1111,7 +1164,7 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 			return true
 		}
 	case VirginTLymphocyte:
-		return len(i.activated) > 0
+		return len(i.mhc_ii.presented) > 0
 	case KillerTLymphocyte:
 		fallthrough
 	case HelperTLymphocyte:
@@ -1131,12 +1184,12 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	switch i.cellType {
 	case Lymphoblast:
 		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
 	case Myeloblast:
 		// Can differentiate into Neutrophil.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
 	case Monocyte:
@@ -1145,9 +1198,9 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 		// differentiate into a macrophage or dendritic cell. In this case, we
 		// flip a coin.
 		if rand.Intn(2) == 0 {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		} else {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		}
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
@@ -1157,16 +1210,16 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 		if rand.Intn(2) == 0 {
 			helperWantPath = [10]string{}
 		}
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), i.transportPath, helperWantPath, i.activated)
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.activated)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), i.transportPath, helperWantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
-		i.activated = make(map[Protein]bool)
+		i.mhc_ii.presented = make(map[Protein]bool)
 		// Keep the original Virgin T Cell.
 		return true
 	case KillerTLymphocyte:
 		fallthrough
 	case HelperTLymphocyte:
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		return true
 	}
 	return true
@@ -1192,7 +1245,7 @@ func (i *Leukocyte) SampleProteins(ctx context.Context, shouldPresent bool) (pro
 			} else {
 				foundOther = true
 				if shouldPresent {
-					i.mhc_ii[protein] = true
+					i.mhc_ii.SetProteins([]Protein{protein})
 				}
 			}
 		}
@@ -1210,7 +1263,7 @@ func (i *Leukocyte) SampleAntigen(a *Antigen, shouldPresent bool) (proteins []Pr
 			} else {
 				foundOther = true
 				if shouldPresent {
-					i.mhc_ii[protein] = true
+					i.mhc_ii.SetProteins([]Protein{protein})
 				}
 			}
 		}
@@ -1226,14 +1279,13 @@ func (i *Leukocyte) Execute(c CellActor) {
 		c.ViralLoad().Unlock()
 	}
 	c.IncurDamage(MAX_DAMAGE + 10)
-	i.IncreaseInflammation()
 	fmt.Println(i, "hit the kill switch on", c)
 }
 
 func (i *Leukocyte) WantEdgeType() []EdgeType {
 	switch i.cellType {
 	case Dendritic:
-		if len(i.mhc_ii) > 0 {
+		if len(i.mhc_ii.presented) > 0 {
 			return []EdgeType{lymphatic}
 		}
 	case VirginTLymphocyte:
@@ -1293,9 +1345,8 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1353,7 +1404,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 		// Enough time has passed that bacteria should be covered in opsonins.
 		// Can perform phagocytosis without NET, which is insta kill.
 		n.Trap(c)
-		c.IncurDamage(MAX_DAMAGE)
+		c.Apoptosis()
 	} else {
 		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 	}
@@ -1387,9 +1438,8 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1467,11 +1517,9 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	}
 	// Phagocytosis.
 	m.Trap(c)
-	c.IncurDamage(MAX_DAMAGE)
+	c.Apoptosis()
 	// Pick up protein signatures for presentation.
-	for _, protein := range antigen.proteins {
-		m.mhc_ii[protein] = true
-	}
+	m.mhc_ii.SetProteins(antigen.proteins)
 }
 
 func CopyMacrophage(base *Macrophage) *Macrophage {
@@ -1501,9 +1549,8 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1566,9 +1613,8 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1597,7 +1643,7 @@ func (d *DendriticCell) DoWork(ctx context.Context) {
 		d.IncreaseInflammation()
 	}
 	// Looking for Virgin T Cells to present to, so draw them closer.
-	if len(d.mhc_ii) > 0 {
+	if len(d.mhc_ii.proteins) > 0 {
 		d.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 	}
 }
@@ -1609,17 +1655,14 @@ func (d *DendriticCell) Interact(ctx context.Context, c CellActor) {
 		d.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		d.IncreaseInflammation()
 		if c.Damage() >= DENDRITIC_PHAGOCYTOSIS_DAMAGE_TRESHOLD {
-			c.IncurDamage(MAX_DAMAGE)
+			c.Apoptosis()
 			d.SampleAntigen(antigen, true)
 		}
 		return
 	}
 	switch c.CellType() {
 	case Macrophagocyte:
-		mhc_ii := c.MHC_II()
-		for p := range mhc_ii {
-			d.mhc_ii[p] = true
-		}
+		d.MHC_II().SetProteins(c.MHC_II().GetProteins())
 	case VirginTLymphocyte:
 		if t, ok := c.(*VirginTCell); ok {
 			t.ShouldActivate(d)
@@ -1654,9 +1697,8 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1676,17 +1718,17 @@ func (t *VirginTCell) BroadcastExistence(ctx context.Context) {
 }
 
 func (t *VirginTCell) ShouldActivate(d *DendriticCell) {
-	if len(d.activated) > 0 {
+	if len(d.mhc_ii.presented) > 0 {
 		// Dendritic Cell has already activated a T cell.
 		return
 	}
-	for protein := range d.mhc_ii {
-		if _, found := t.mhc_ii[protein]; found {
-			t.activated[protein] = true
-			d.activated[protein] = true
+	for _, protein := range d.mhc_ii.GetProteins() {
+		if t.mhc_ii.Get(protein) {
+			t.mhc_ii.SetPresented([]Protein{protein})
+			d.mhc_ii.SetPresented([]Protein{protein})
 		}
 	}
-	if len(t.activated) > 0 {
+	if len(t.mhc_ii.presented) > 0 {
 		t.wantPath = d.transportPath
 		t.Organ().materialPool.PutHormone(&HormoneBlob{
 			interleukin_2: HORMONE_TCELL_DROP,
@@ -1722,9 +1764,8 @@ func CopyVirginTCell(base *VirginTCell) *VirginTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1743,6 +1784,10 @@ func (t *HelperTCell) BroadcastExistence(ctx context.Context) {
 	BroadcastExistence(ctx, t)
 }
 
+func (t *HelperTCell) DoesWork() bool {
+	return true
+}
+
 func (t *HelperTCell) DoWork(ctx context.Context) {
 	// Looking for B Cells to present to, so draw them closer.
 	t.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
@@ -1759,7 +1804,7 @@ func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 	switch c.CellType() {
 	case Macrophagocyte:
 		if m, ok := c.(*Macrophage); ok {
-			m.activated = t.mhc_ii
+			m.mhc_ii.SetPresented(t.mhc_ii.GetProteins())
 		}
 	case BLymphocyte:
 		if b, ok := c.(*BCell); ok {
@@ -1795,9 +1840,8 @@ func CopyHelperTCell(base *HelperTCell) *HelperTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1858,9 +1902,8 @@ func CopyKillerTCell(base *KillerTCell) *KillerTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -1879,10 +1922,13 @@ func (b *BCell) BroadcastExistence(ctx context.Context) {
 	BroadcastExistence(ctx, b)
 }
 
+func (b *BCell) DoesWork() bool {
+	return true
+}
+
 func (b *BCell) DoWork(ctx context.Context) {
-	for protein, _ := range b.activated {
+	for _, protein := range b.mhc_ii.GetPresented() {
 		b.organ.antigenPool.DepositAntibodyLoad(&AntibodyLoad{
-			RWMutex:       sync.RWMutex{},
 			targetProtein: protein,
 			concentration: BCELL_ANTIBODY_PRODUCTION,
 		})
@@ -1890,17 +1936,17 @@ func (b *BCell) DoWork(ctx context.Context) {
 }
 
 func (b *BCell) ShouldActivate(t *HelperTCell) {
-	if len(t.activated) > 0 {
+	if len(t.mhc_ii.presented) > 0 {
 		// Helper T Cell has already activated a B cell.
 		return
 	}
-	for protein := range t.mhc_ii {
-		if _, found := b.mhc_ii[protein]; found {
-			b.activated[protein] = true
-			t.activated[protein] = true
+	for _, protein := range t.mhc_ii.GetProteins() {
+		if b.mhc_ii.Get(protein) {
+			b.mhc_ii.SetPresented([]Protein{protein})
+			t.mhc_ii.SetPresented([]Protein{protein})
 		}
 	}
-	if len(b.activated) > 0 {
+	if len(b.mhc_ii.presented) > 0 {
 		fmt.Println("B Cell activated in ", t.organ)
 	}
 }
@@ -1932,9 +1978,8 @@ func CopyBCell(base *BCell) *BCell {
 				wantPath:      base.wantPath,
 				spawnTime:     time.Now(),
 			},
-			lifeSpan:  base.lifeSpan,
-			mhc_ii:    base.mhc_ii,
-			activated: make(map[Protein]bool),
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
 		},
 	}
 }
@@ -2110,9 +2155,12 @@ func (v *VirusCarrier) Mitosis(ctx context.Context) bool {
 }
 
 func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string, mhc_ii_proteins []Protein) (cell CellActor) {
-	mhc_ii := make(map[Protein]bool)
+	mhc_ii := &MHC_II{
+		proteins:  map[Protein]bool{},
+		presented: map[Protein]bool{},
+	}
 	for _, protein := range mhc_ii_proteins {
-		mhc_ii[protein] = true
+		mhc_ii.proteins[protein] = true
 	}
 	switch cellType {
 	// Bacteria

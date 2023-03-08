@@ -54,13 +54,18 @@ func (p *InteractionPool) Put(r *Renderable, c CellActor) {
 }
 
 func (p *InteractionPool) Get() CellActor {
-	p.Lock()
-	defer p.Unlock()
-	for id, c := range p.interactionMap {
-		delete(p.interactionMap, id)
+	p.RLock()
+	defer p.RUnlock()
+	for _, c := range p.interactionMap {
 		return c
 	}
 	return nil
+}
+
+func (p *InteractionPool) Delete(id RenderID) {
+	p.Lock()
+	defer p.Unlock()
+	delete(p.interactionMap, id)
 }
 
 type Tissue struct {
@@ -268,6 +273,8 @@ func (t *Tissue) BroadcastPosition(ctx context.Context, cell CellActor, r *Rende
 }
 
 func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactions []CellActor) {
+	ctx, cancel := context.WithTimeout(ctx, INTERACTIONS_TIMEOUT)
+	defer cancel()
 	m := t.FindMatrix(r)
 	if m == nil {
 		return
@@ -287,21 +294,35 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 		{x_minus, y_minus},
 		{x, y_minus},
 		{x_plus, y_minus}}
-	var interactionPools [9]*InteractionPool
-	for i, pt := range points {
-		pool, _ := m.interactionsPool.LoadOrStore(pt, &InteractionPool{
-			interactionMap: map[RenderID]CellActor{},
-		})
-		interactionPools[i] = pool.(*InteractionPool)
-	}
-
-	for i, pool := range interactionPools {
-		if c := pool.Get(); c != nil {
-			if c.Render().position.Eq(points[i]) {
-				interactions = append(interactions, c)
-				pool.Put(c.Render(), c)
+	interactionsChan := make(chan CellActor)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				close(interactionsChan)
+				return
+			default:
+				allNil := true
+				for i, pt := range points {
+					pool, _ := m.interactionsPool.LoadOrStore(pt, &InteractionPool{
+						interactionMap: map[RenderID]CellActor{},
+					})
+					interactionPool := pool.(*InteractionPool)
+					if c := interactionPool.Get(); c != nil && c.Render().position.Eq(points[i]) {
+						interactionsChan <- c
+					} else if c != nil {
+						interactionPool.Delete(c.Render().id)
+						allNil = false
+					}
+				}
+				if allNil {
+					cancel()
+				}
 			}
 		}
+	}()
+	for c := range interactionsChan {
+		interactions = append(interactions, c)
 	}
 	return
 }

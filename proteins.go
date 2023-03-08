@@ -30,6 +30,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 			case <-ticker.C:
 				if s.current != nil {
 					if hasOrganOrCleanup(ctx, cell) && s.current.function != nil {
+						cell.BroadcastExistence(ctx)
 						if !s.current.function.Run(ctx, cell) {
 							cancel()
 						}
@@ -42,8 +43,6 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 				} else {
 					cancel()
 				}
-			default:
-				cell.BroadcastExistence(ctx)
 			}
 		}
 	}
