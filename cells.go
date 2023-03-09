@@ -178,6 +178,7 @@ type Cell struct {
 	transportPath [10]string
 	wantPath      [10]string
 	spawnTime     time.Time
+	transportTime time.Time
 	antibodyLoad  *AntibodyLoad
 	viralLoad     *ViralLoad
 }
@@ -264,6 +265,9 @@ func (c *Cell) Repair(damage int) {
 }
 
 func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
+	if c.Organ() == nil {
+		return false
+	}
 	hasAntibodies := c.antibodyLoad != nil && c.antibodyLoad.concentration > 0
 	waste := c.Organ().materialPool.GetWaste(ctx)
 	c.Organ().materialPool.PutWaste(waste)
@@ -796,7 +800,7 @@ func Transport(c CellActor) bool {
 			edge = transportEdges[rand.Intn(len(transportEdges))]
 		}
 	}
-	err := MakeTransportRequest(edge.transportUrl, c.DNA().name, c.DNA(), c.CellType(), c.WorkType(), string(c.Render().id), c.TransportPath(), c.WantPath(), c.MHC_II().proteins)
+	err := MakeTransportRequest(edge.transportUrl, c.DNA().name, c.DNA(), c.CellType(), c.WorkType(), string(c.Render().id), c.SpawnTime(), c.TransportPath(), c.WantPath(), c.MHC_II().proteins)
 	if err != nil {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
@@ -897,7 +901,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 	if e.organ == nil {
 		return false
 	}
-	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), e.transportPath, e.wantPath, map[Protein]bool{})
+	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), time.Now(), e.transportPath, e.wantPath, map[Protein]bool{})
 	return true
 }
 
@@ -925,15 +929,15 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 		hormone := e.organ.materialPool.GetHormone(ctx)
 		if hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD {
 			hormone.granulocyte_csf -= HORMONE_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD {
 			hormone.interleukin_3 -= HORMONE_IL3_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		e.organ.materialPool.PutHormone(hormone)
 		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
@@ -1043,8 +1047,9 @@ func (m *MHC_II) ClearPresented() {
 
 type Leukocyte struct {
 	*Cell
-	lifeSpan time.Duration
-	mhc_ii   *MHC_II
+	lifeSpan      time.Duration
+	transportSpan time.Duration
+	mhc_ii        *MHC_II
 }
 
 type AntigenPresenting interface {
@@ -1058,11 +1063,15 @@ func (i *Leukocyte) MHC_II() *MHC_II {
 }
 
 func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
-	return i.Cell.ShouldIncurDamage(ctx) && i.TimeLeft() < 0
+	return i.Cell.ShouldIncurDamage(ctx) || i.TimeLeft() < 0
 }
 
 func (i *Leukocyte) TimeLeft() time.Duration {
 	return time.Until(i.spawnTime.Add(i.lifeSpan))
+}
+
+func (i *Leukocyte) TimeToTransport() time.Duration {
+	return time.Until(i.transportTime.Add(i.transportSpan))
 }
 
 func (i *Leukocyte) CanTransport() bool {
@@ -1097,8 +1106,7 @@ func (i *Leukocyte) CanTransport() bool {
 }
 
 func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
-	// Wait until the lifespan is over before moving on.
-	if i.TimeLeft() > 0 {
+	if i.TimeToTransport() > 0 || i.organ == nil {
 		return false
 	}
 	switch i.cellType {
@@ -1197,12 +1205,12 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	switch i.cellType {
 	case Lymphoblast:
 		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
 	case Myeloblast:
 		// Can differentiate into Neutrophil.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
 	case Monocyte:
@@ -1211,9 +1219,9 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 		// differentiate into a macrophage or dendritic cell. In this case, we
 		// flip a coin.
 		if rand.Intn(2) == 0 {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		} else {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		}
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
@@ -1223,8 +1231,8 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 		if rand.Intn(2) == 0 {
 			helperWantPath = [10]string{}
 		}
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), i.transportPath, helperWantPath, i.mhc_ii.presented)
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, helperWantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
 		i.mhc_ii.ClearPresented()
 		// Keep the original Virgin T Cell.
@@ -1232,11 +1240,11 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	case KillerTLymphocyte:
 		fallthrough
 	case HelperTLymphocyte:
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		return true
 	case BLymphocyte:
 		// Split B cell into the original B cell and an Effector B cell.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, EffectorBLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, EffectorBLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
 		i.mhc_ii.ClearPresented()
 		// Keep the original B Cell.
@@ -1298,7 +1306,7 @@ func (i *Leukocyte) Execute(c CellActor) {
 		c.ViralLoad().concentration = 0
 		c.ViralLoad().Unlock()
 	}
-	c.IncurDamage(MAX_DAMAGE + 10)
+	c.Apoptosis()
 	fmt.Println(i, "hit the kill switch on", c)
 }
 
@@ -1363,10 +1371,12 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1377,7 +1387,7 @@ type Neutrophil struct {
 }
 
 func (n *Neutrophil) ShouldIncurDamage(ctx context.Context) bool {
-	return n.Cell.ShouldIncurDamage(ctx) && n.inNETosis
+	return n.Leukocyte.ShouldIncurDamage(ctx) || n.inNETosis
 }
 
 func (n *Neutrophil) CanRepair() bool {
@@ -1456,10 +1466,12 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1567,10 +1579,12 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1631,10 +1645,12 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1651,6 +1667,10 @@ func (d *DendriticCell) Start(ctx context.Context) {
 
 func (d *DendriticCell) BroadcastExistence(ctx context.Context) {
 	BroadcastExistence(ctx, d)
+}
+
+func (d *DendriticCell) ShouldIncurDamage(ctx context.Context) bool {
+	return d.Leukocyte.ShouldIncurDamage(ctx) || len(d.mhc_ii.presented) > 0
 }
 
 func (d *DendriticCell) DoesWork() bool {
@@ -1715,10 +1735,12 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1782,10 +1804,12 @@ func CopyVirginTCell(base *VirginTCell) *VirginTCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1858,10 +1882,12 @@ func CopyHelperTCell(base *HelperTCell) *HelperTCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1920,10 +1946,12 @@ func CopyKillerTCell(base *KillerTCell) *KillerTCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -1983,10 +2011,12 @@ func CopyBCell(base *BCell) *BCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -2043,10 +2073,12 @@ func CopyEffectorBCell(base *EffectorBCell) *EffectorBCell {
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     base.spawnTime,
+				transportTime: base.transportTime,
 			},
-			lifeSpan: base.lifeSpan,
-			mhc_ii:   base.mhc_ii,
+			lifeSpan:      base.lifeSpan,
+			transportSpan: base.transportSpan,
+			mhc_ii:        base.mhc_ii,
 		},
 	}
 }
@@ -2088,7 +2120,8 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 			},
 			transportPath: base.transportPath,
 			wantPath:      base.wantPath,
-			spawnTime:     time.Now(),
+			spawnTime:     base.spawnTime,
+			transportTime: base.transportTime,
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -2134,7 +2167,7 @@ func (p *ProkaryoticCell) Mitosis(ctx context.Context) bool {
 	if p.organ == nil {
 		return false
 	}
-	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), p.transportPath, p.wantPath, nil)
+	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), time.Now(), p.transportPath, p.wantPath, nil)
 	return true
 }
 
@@ -2171,7 +2204,8 @@ func CopyViralLoadCarrier(base *VirusCarrier) *VirusCarrier {
 			render:        &Renderable{},
 			transportPath: base.transportPath,
 			wantPath:      base.wantPath,
-			spawnTime:     time.Now(),
+			spawnTime:     base.spawnTime,
+			transportTime: base.transportTime,
 		},
 		virus: &Virus{
 			dna:            base.dna,
@@ -2221,7 +2255,7 @@ func (v *VirusCarrier) Mitosis(ctx context.Context) bool {
 	return false
 }
 
-func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, transportPath [10]string, wantPath [10]string, mhc_ii_proteins []Protein) (cell CellActor) {
+func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Renderable, spawnTime time.Time, transportPath [10]string, wantPath [10]string, mhc_ii_proteins []Protein) (cell CellActor) {
 	mhc_ii := &MHC_II{
 		proteins:  map[Protein]bool{},
 		presented: map[Protein]bool{},
@@ -2241,7 +2275,8 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				render:        render,
 				transportPath: transportPath,
 				wantPath:      wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     spawnTime,
+				transportTime: time.Now(),
 			},
 		})
 	// Viral Load
@@ -2254,7 +2289,8 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				render:        render,
 				transportPath: transportPath,
 				wantPath:      wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     spawnTime,
+				transportTime: time.Now(),
 			},
 			virus: &Virus{},
 		})
@@ -2273,10 +2309,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
-					spawnTime:     time.Now(),
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
 				},
-				lifeSpan: LEUKOCYTE_STEM_CELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
+				lifeSpan:      LEUKOCYTE_STEM_CELL_LIFE_SPAN,
+				transportSpan: LEUKOCYTE_STEM_CELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
 			},
 		})
 	case Macrophagocyte:
@@ -2289,122 +2327,12 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
-					spawnTime:     time.Now(),
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
 				},
-				lifeSpan: MACROPHAGE_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case Neutrocyte:
-		cell = CopyNeutrophil(&Neutrophil{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: NEUTROPHIL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case NaturalKillerCell:
-		cell = CopyNaturalKiller(&NaturalKiller{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: NATURALKILLER_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case VirginTLymphocyte:
-		cell = CopyVirginTCell(&VirginTCell{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: VIRGIN_TCELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case HelperTLymphocyte:
-		cell = CopyHelperTCell(&HelperTCell{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: HELPER_TCELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case KillerTLymphocyte:
-		cell = CopyKillerTCell(&KillerTCell{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: KILLER_TCELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case BLymphocyte:
-		cell = CopyBCell(&BCell{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: BCELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
-			},
-		})
-	case EffectorBLymphocyte:
-		cell = CopyEffectorBCell(&EffectorBCell{
-			Leukocyte: &Leukocyte{
-				Cell: &Cell{
-					cellType:      cellType,
-					dna:           dna,
-					workType:      workType,
-					render:        render,
-					transportPath: transportPath,
-					wantPath:      wantPath,
-					spawnTime:     time.Now(),
-				},
-				lifeSpan: EFFECTOR_BCELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
+				lifeSpan:      MACROPHAGE_LIFE_SPAN,
+				transportSpan: MACROPHAGE_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
 			},
 		})
 	case Dendritic:
@@ -2417,10 +2345,138 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					render:        render,
 					transportPath: transportPath,
 					wantPath:      wantPath,
-					spawnTime:     time.Now(),
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
 				},
-				lifeSpan: DENDRITIC_CELL_LIFE_SPAN,
-				mhc_ii:   mhc_ii,
+				lifeSpan:      DENDRITIC_CELL_LIFE_SPAN,
+				transportSpan: DENDRITIC_CELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case Neutrocyte:
+		cell = CopyNeutrophil(&Neutrophil{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      NEUTROPHIL_LIFE_SPAN,
+				transportSpan: NEUTROPHIL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case NaturalKillerCell:
+		cell = CopyNaturalKiller(&NaturalKiller{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      NATURALKILLER_LIFE_SPAN,
+				transportSpan: NATURALKILLER_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case VirginTLymphocyte:
+		cell = CopyVirginTCell(&VirginTCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      VIRGIN_TCELL_LIFE_SPAN,
+				transportSpan: VIRGIN_TCELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case HelperTLymphocyte:
+		cell = CopyHelperTCell(&HelperTCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      HELPER_TCELL_LIFE_SPAN,
+				transportSpan: HELPER_TCELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case KillerTLymphocyte:
+		cell = CopyKillerTCell(&KillerTCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      KILLER_TCELL_LIFE_SPAN,
+				transportSpan: KILLER_TCELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case BLymphocyte:
+		cell = CopyBCell(&BCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      BCELL_LIFE_SPAN,
+				transportSpan: BCELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
+			},
+		})
+	case EffectorBLymphocyte:
+		cell = CopyEffectorBCell(&EffectorBCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     spawnTime,
+					transportTime: time.Now(),
+				},
+				lifeSpan:      EFFECTOR_BCELL_LIFE_SPAN,
+				transportSpan: EFFECTOR_BCELL_TRANSPORT_SPAN,
+				mhc_ii:        mhc_ii,
 			},
 		})
 	case RedBlood:
@@ -2448,7 +2504,8 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				render:        render,
 				transportPath: transportPath,
 				wantPath:      wantPath,
-				spawnTime:     time.Now(),
+				spawnTime:     spawnTime,
+				transportTime: time.Now(),
 			},
 		})
 	default:

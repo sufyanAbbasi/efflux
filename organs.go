@@ -123,6 +123,7 @@ type TransportRequest struct {
 	CellType        CellType
 	WorkType        WorkType
 	ParentRenderID  string
+	SpawnTime       time.Time
 	TransportPath   [10]string
 	WantPath        [10]string
 	MHC_II_Proteins []Protein
@@ -152,6 +153,7 @@ func MakeTransportRequest(
 	cellType CellType,
 	workType WorkType,
 	parentRenderID string,
+	spawnTime time.Time,
 	transportPath [10]string,
 	wantPath [10]string,
 	mhc_ii map[Protein]bool,
@@ -177,6 +179,7 @@ func MakeTransportRequest(
 		CellType:        cellType,
 		WorkType:        workType,
 		ParentRenderID:  parentRenderID,
+		SpawnTime:       spawnTime,
 		TransportPath:   transportPath,
 		WantPath:        wantPath,
 		MHC_II_Proteins: mhc_ii_proteins,
@@ -259,7 +262,7 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 			position: image.Point{RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS), RandInRange(-MAIN_STAGE_RADIUS, MAIN_STAGE_RADIUS)},
 		}
 	}
-	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.TransportPath, request.WantPath, request.MHC_II_Proteins), nil
+	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.SpawnTime, request.TransportPath, request.WantPath, request.MHC_II_Proteins), nil
 }
 
 func SendWork(connection *Connection, request Work) {

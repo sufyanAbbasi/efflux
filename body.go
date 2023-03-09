@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 )
 
 type Graph struct {
@@ -75,10 +76,10 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, nodes := range nodeTypes {
 		for _, node := range nodes {
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "", [10]string{}, [10]string{}, nil)
+				MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellTypes[i], workTypes[i], "", time.Now(), [10]string{}, [10]string{}, nil)
 				if cellTypes[i] == Neuron {
 					// Add a Hemocytoblast to the brain, to spawn immune cells.
-					MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, Hemocytoblast, nothing, "", [10]string{}, [10]string{}, nil)
+					MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, Hemocytoblast, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 				}
 			}
 		}
@@ -87,7 +88,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, mhc_ii := range humanDNA.Generate_MHCII_Groups(VIRGIN_TCELL_COUNT) {
 		node := b.lymphNodes[i%len(b.lymphNodes)]
 		for j := 0; j < VIRGIN_TCELL_REDUNDANCY; j++ {
-			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, VirginTLymphocyte, nothing, "", [10]string{}, [10]string{}, mhc_ii)
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, VirginTLymphocyte, nothing, "", time.Now(), [10]string{}, [10]string{}, mhc_ii)
 		}
 	}
 
@@ -95,7 +96,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	for i, mhc_ii := range humanDNA.Generate_MHCII_Groups(BCELL_COUNT) {
 		node := b.boneNodes[i%len(b.boneNodes)]
 		for j := 0; j < BCELL_REDUNDANCY; j++ {
-			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, BLymphocyte, nothing, "", [10]string{}, [10]string{}, mhc_ii)
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, BLymphocyte, nothing, "", time.Now(), [10]string{}, [10]string{}, mhc_ii)
 		}
 	}
 
@@ -117,7 +118,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		for _, node := range nodes {
 			bacteriaDNA := MakeDNA(BACTERIA_DNA, names[i])
 			for j := 0; j < counts[i]; j++ {
-				MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellTypes[i], nothing, "", [10]string{}, [10]string{}, nil)
+				MakeTransportRequest(node.transportUrl, names[i], bacteriaDNA, cellTypes[i], nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 			}
 		}
 	}
@@ -152,7 +153,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	dna = append(dna, virusDNA)
 	for i, cellType := range cellTypes {
 		for j := 0; j < counts[i]; j++ {
-			MakeTransportRequest(node.transportUrl, names[i], dna[i], cellType, nothing, "", [10]string{}, [10]string{}, nil)
+			MakeTransportRequest(node.transportUrl, names[i], dna[i], cellType, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 		}
 	}
 	// Immune cells.
@@ -170,7 +171,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	for i, cellType := range cellTypes {
 		for j := 0; j < counts[i]; j++ {
-			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellType, nothing, "", [10]string{}, [10]string{}, nil)
+			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellType, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 		}
 	}
 
