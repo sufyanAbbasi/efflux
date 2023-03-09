@@ -431,6 +431,8 @@ function getCellColor(id) {
             return 'seagreen';
         case 'BLymphocyte':
             return 'lightsalmon';
+        case 'EffectorBLymphocyte':
+            return 'salmon';
         case 'RedBlood':
         case 'Neuron':
         case 'Cardiomyocyte':

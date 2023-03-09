@@ -437,6 +437,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		fallthrough
 	case BLymphocyte:
 		fallthrough
+	case EffectorBLymphocyte:
+		fallthrough
 	case Dendritic:
 		// Do nothing special.
 	case RedBlood:
@@ -575,6 +577,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		case Myeloblast:
 			fallthrough
 		case Monocyte:
+			fallthrough
+		case EffectorBLymphocyte:
 			fallthrough
 		default:
 			currNode.next = &StateNode{

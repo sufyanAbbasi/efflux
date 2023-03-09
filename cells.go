@@ -20,25 +20,26 @@ const (
 	Bacteroidota                 // Bacteria that synthesize vitamins in the gut.
 	RedBlood
 	Neuron
-	Cardiomyocyte     // Heart Cell
-	Pneumocyte        // Pulmonary Cell
-	Myocyte           // Muscle Cell
-	Keratinocyte      // Skin Cell
-	Enterocyte        // Gut Lining Cell
-	Podocyte          // Kidney Cell
-	Hemocytoblast     // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
-	Lymphoblast       // Stem Cell, becomes NK, B cells, T cells
-	Myeloblast        // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
-	Monocyte          // Stem Cell, becomes Macrophages and Dendritic cells
-	Macrophagocyte    // Macrophage
-	Dendritic         // Dendritic Cells
-	Neutrocyte        // Neutrophils
-	NaturalKillerCell // Natural Killer Cell
-	VirginTLymphocyte // Virgin T Cell
-	HelperTLymphocyte // Helper T Cell
-	KillerTLymphocyte // Killer T Cell
-	BLymphocyte       // B Cell
-	ViralLoadCarrier  // A dummy cell that carries a virus. Always make sure this is last.
+	Cardiomyocyte       // Heart Cell
+	Pneumocyte          // Pulmonary Cell
+	Myocyte             // Muscle Cell
+	Keratinocyte        // Skin Cell
+	Enterocyte          // Gut Lining Cell
+	Podocyte            // Kidney Cell
+	Hemocytoblast       // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
+	Lymphoblast         // Stem Cell, becomes NK, B cells, T cells
+	Myeloblast          // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
+	Monocyte            // Stem Cell, becomes Macrophages and Dendritic cells
+	Macrophagocyte      // Macrophage
+	Dendritic           // Dendritic Cells
+	Neutrocyte          // Neutrophils
+	NaturalKillerCell   // Natural Killer Cell
+	VirginTLymphocyte   // Virgin T Cell
+	HelperTLymphocyte   // Helper T Cell
+	KillerTLymphocyte   // Killer T Cell
+	BLymphocyte         // B Cell
+	EffectorBLymphocyte // Plasma Cell
+	ViralLoadCarrier    // A dummy cell that carries a virus. Always make sure this is last.
 )
 
 func (c CellType) String() string {
@@ -89,6 +90,8 @@ func (c CellType) String() string {
 		return "KillerTLymphocyte"
 	case BLymphocyte:
 		return "BLymphocyte"
+	case EffectorBLymphocyte:
+		return "EffectorBLymphocyte"
 	}
 	return "Unknown"
 }
@@ -443,6 +446,8 @@ func (c *Cell) ResetResourceNeed() {
 	case KillerTLymphocyte:
 		fallthrough
 	case BLymphocyte:
+		fallthrough
+	case EffectorBLymphocyte:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
 			glucose: 0,
@@ -511,6 +516,8 @@ func (c *Cell) ProduceWaste() {
 		case KillerTLymphocyte:
 			fallthrough
 		case BLymphocyte:
+			fallthrough
+		case EffectorBLymphocyte:
 			// No waste produced.
 		case Bacteroidota:
 			c.organ.materialPool.PutWaste(&WasteBlob{
@@ -1080,6 +1087,8 @@ func (i *Leukocyte) CanTransport() bool {
 		return true
 	case BLymphocyte:
 		return false
+	case EffectorBLymphocyte:
+		return false
 	case Dendritic:
 		return true
 	default:
@@ -1142,6 +1151,8 @@ func (i *Leukocyte) CanInteract() bool {
 	case VirginTLymphocyte:
 		fallthrough
 	case BLymphocyte:
+		fallthrough
+	case EffectorBLymphocyte:
 		return false
 	default:
 		return true
@@ -1174,6 +1185,8 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 			hormone.interleukin_2 -= HORMONE_IL2_THRESHOLD
 			return true
 		}
+	case BLymphocyte:
+		return len(i.mhc_ii.presented) > 0
 	}
 	// All other leukocytes don't differentiate.
 	return false
@@ -1213,13 +1226,20 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), i.transportPath, helperWantPath, i.mhc_ii.presented)
 		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
-		i.mhc_ii.presented = make(map[Protein]bool)
+		i.mhc_ii.ClearPresented()
 		// Keep the original Virgin T Cell.
 		return true
 	case KillerTLymphocyte:
 		fallthrough
 	case HelperTLymphocyte:
 		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		return true
+	case BLymphocyte:
+		// Split B cell into the original B cell and an Effector B cell.
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, EffectorBLymphocyte, nothing, string(i.render.id), i.transportPath, i.wantPath, i.mhc_ii.presented)
+		// Deactivate after mitosis.
+		i.mhc_ii.ClearPresented()
+		// Keep the original B Cell.
 		return true
 	}
 	return true
@@ -1922,19 +1942,6 @@ func (b *BCell) BroadcastExistence(ctx context.Context) {
 	BroadcastExistence(ctx, b)
 }
 
-func (b *BCell) DoesWork() bool {
-	return true
-}
-
-func (b *BCell) DoWork(ctx context.Context) {
-	for _, protein := range b.mhc_ii.GetPresented() {
-		b.organ.antigenPool.DepositAntibodyLoad(&AntibodyLoad{
-			targetProtein: protein,
-			concentration: BCELL_ANTIBODY_PRODUCTION,
-		})
-	}
-}
-
 func (b *BCell) ShouldActivate(t *HelperTCell) {
 	if len(t.mhc_ii.presented) > 0 {
 		// Helper T Cell has already activated a B cell.
@@ -1959,6 +1966,66 @@ func CopyBCell(base *BCell) *BCell {
 	positionTracker := ring.New(POSITION_TRACKER_SIZE)
 	positionTracker.Value = position
 	return &BCell{
+		Leukocyte: &Leukocyte{
+			Cell: &Cell{
+				cellType: base.cellType,
+				dna:      base.dna,
+				mhc_i:    base.dna.MHC_I(),
+				workType: base.workType,
+				render: &Renderable{
+					id:            MakeRenderId(base.cellType.String()),
+					visible:       true,
+					position:      position,
+					targetX:       base.render.targetX,
+					targetY:       base.render.targetY,
+					targetZ:       base.render.targetZ,
+					lastPositions: positionTracker,
+				},
+				transportPath: base.transportPath,
+				wantPath:      base.wantPath,
+				spawnTime:     time.Now(),
+			},
+			lifeSpan: base.lifeSpan,
+			mhc_ii:   base.mhc_ii,
+		},
+	}
+}
+
+type EffectorBCell struct {
+	*Leukocyte
+}
+
+func (b *EffectorBCell) Start(ctx context.Context) {
+	b.function = b.dna.makeFunction(b, b.dna)
+	go b.function.Run(ctx, b)
+	b.Tissue().Attach(b.render)
+}
+
+func (b *EffectorBCell) BroadcastExistence(ctx context.Context) {
+	BroadcastExistence(ctx, b)
+}
+
+func (b *EffectorBCell) DoesWork() bool {
+	return true
+}
+
+func (b *EffectorBCell) DoWork(ctx context.Context) {
+	for _, protein := range b.mhc_ii.GetProteins() {
+		b.organ.antigenPool.DepositAntibodyLoad(&AntibodyLoad{
+			targetProtein: protein,
+			concentration: EFFECTOR_BCELL_ANTIBODY_PRODUCTION,
+		})
+	}
+}
+
+func CopyEffectorBCell(base *EffectorBCell) *EffectorBCell {
+	position := image.Point{
+		base.render.position.X,
+		base.render.position.Y,
+	}
+	positionTracker := ring.New(POSITION_TRACKER_SIZE)
+	positionTracker.Value = position
+	return &EffectorBCell{
 		Leukocyte: &Leukocyte{
 			Cell: &Cell{
 				cellType: base.cellType,
@@ -2321,6 +2388,22 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 					spawnTime:     time.Now(),
 				},
 				lifeSpan: BCELL_LIFE_SPAN,
+				mhc_ii:   mhc_ii,
+			},
+		})
+	case EffectorBLymphocyte:
+		cell = CopyEffectorBCell(&EffectorBCell{
+			Leukocyte: &Leukocyte{
+				Cell: &Cell{
+					cellType:      cellType,
+					dna:           dna,
+					workType:      workType,
+					render:        render,
+					transportPath: transportPath,
+					wantPath:      wantPath,
+					spawnTime:     time.Now(),
+				},
+				lifeSpan: EFFECTOR_BCELL_LIFE_SPAN,
 				mhc_ii:   mhc_ii,
 			},
 		})
