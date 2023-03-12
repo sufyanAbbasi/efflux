@@ -1124,7 +1124,7 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 		// If there is no inflammation, move on.
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
-		return ligand.inflammation < LEUKOCYTE_INFLAMMATION_THRESHOLD
+		return ligand.inflammation < LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD
 	}
 }
 
@@ -1200,8 +1200,8 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 		// If there is no inflammation, don't differentiate.
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
-		if ligand.inflammation >= LEUKOCYTE_INFLAMMATION_THRESHOLD {
-			ligand.inflammation -= LEUKOCYTE_INFLAMMATION_THRESHOLD
+		if ligand.inflammation >= LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD {
+			ligand.inflammation -= LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD
 			return true
 		}
 	case VirginTLymphocyte:
@@ -1276,7 +1276,6 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 }
 
 func (i *Leukocyte) IncreaseInflammation() {
-	fmt.Println(i, "IncreaseInflammation", i.Organ())
 	i.Organ().materialPool.PutLigand(&LigandBlob{
 		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
 	})
@@ -1868,7 +1867,6 @@ func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
 		t.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		t.IncreaseInflammation()
-		fmt.Println(t, "found", c, c.Organ(), c.Render().id)
 		return
 	}
 	switch c.CellType() {
@@ -1939,7 +1937,6 @@ func (t *KillerTCell) Interact(ctx context.Context, c CellActor) {
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
 		t.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 		t.IncreaseInflammation()
-		fmt.Println(t, "found", c, c.Organ(), c.Render().id)
 		return
 	}
 	// Else, check that this cell is presenting an antigen that it recognizes.
