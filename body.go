@@ -130,8 +130,8 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		ViralLoadCarrier,
 	}
 	counts = []int{
-		5,
 		0,
+		11,
 	}
 	names = []string{
 		"Clostridium tetani",

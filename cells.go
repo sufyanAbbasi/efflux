@@ -1201,7 +1201,6 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
 		if ligand.inflammation >= LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD {
-			ligand.inflammation -= LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD
 			return true
 		}
 	case VirginTLymphocyte:
@@ -1531,26 +1530,26 @@ func (m *Macrophage) DoWork(ctx context.Context) {
 	if foundCytokine {
 		m.activationTime = time.Now()
 	}
-	_, foundSelf, _ := m.SampleProteins(ctx, true)
+	_, foundSelf, foundOther := m.SampleProteins(ctx, true)
 	if m.IsActivated() {
 		m.Organ().materialPool.PutHormone(&HormoneBlob{
 			macrophage_csf:  HORMONE_MACROPHAGE_DROP,
 			granulocyte_csf: HORMONE_MACROPHAGE_DROP,
 			interleukin_3:   HORMONE_MACROPHAGE_DROP,
 		})
-	} else {
+	} else if !foundOther {
 		// Reduce inflammation.
 		ligand := m.Organ().materialPool.GetLigand(ctx)
 		if ligand.inflammation > MACROPHAGE_INFLAMMATION_CONSUMPTION {
 			ligand.inflammation -= MACROPHAGE_INFLAMMATION_CONSUMPTION
 		}
 		m.Organ().materialPool.PutLigand(ligand)
-		if foundSelf {
-			// Found a dead cell. Signal growth.
-			m.Organ().materialPool.PutLigand(&LigandBlob{
-				growth: MACROPHAGE_STIMULATE_CELL_GROWTH,
-			})
-		}
+	}
+	if foundSelf {
+		// Found a dead cell. Signal growth.
+		m.Organ().materialPool.PutLigand(&LigandBlob{
+			growth: MACROPHAGE_STIMULATE_CELL_GROWTH,
+		})
 	}
 }
 
@@ -2169,6 +2168,30 @@ func (p *ProkaryoticCell) DoesWork() bool {
 
 func (p *ProkaryoticCell) CanTransport() bool {
 	return true
+}
+
+func (p *ProkaryoticCell) TimeToTransport() time.Duration {
+	var transportDuration time.Duration
+	switch p.cellType {
+	case Bacteroidota:
+		transportDuration = GUT_BACTERIA_TRANSPORT_DURATION
+	default:
+		transportDuration = DEFAULT_BACTERIA_TRANSPORT_DURATION
+	}
+	return time.Until(p.transportTime.Add(transportDuration))
+}
+
+func (p *ProkaryoticCell) ShouldTransport(ctx context.Context) bool {
+	return p.TimeToTransport() < 0
+}
+
+func (p *ProkaryoticCell) WantEdgeType() []EdgeType {
+	switch p.cellType {
+	case Bacteroidota:
+		return []EdgeType{gut_lining}
+	default:
+		return []EdgeType{muscular}
+	}
 }
 
 func (p *ProkaryoticCell) CanRepair() bool {

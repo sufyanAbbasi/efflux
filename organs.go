@@ -737,6 +737,13 @@ func (n *Node) SendDiffusion(ctx context.Context) {
 			result:   string(diffusionData),
 			status:   0,
 		})
+
+		// If there are viral loads that are greater than max, deposit it.
+		for _, viralLoad := range n.antigenPool.GetExcessViralLoad() {
+			virusDNA := viralLoad.virus.dna
+			fmt.Println("Viral load diffused to", edge.transportUrl)
+			MakeTransportRequest(edge.transportUrl, virusDNA.name, virusDNA, ViralLoadCarrier, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
+		}
 	}
 }
 

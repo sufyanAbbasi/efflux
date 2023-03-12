@@ -150,6 +150,20 @@ func (a *AntigenPool) SampleVirusProteins(sampleRate int64) (proteins []Protein)
 	return
 }
 
+func (a *AntigenPool) GetExcessViralLoad() (viralLoads []*ViralLoad) {
+	a.viralLoads.Range(func(_, v any) bool {
+		viralLoad := v.(*ViralLoad)
+		viralLoad.Lock()
+		if viralLoad.concentration > MAX_VIRAL_LOAD {
+			viralLoads = append(viralLoads, viralLoad)
+			viralLoad.concentration -= VIRAL_LOAD_CARRIER_CONCENTRATION
+		}
+		viralLoad.Unlock()
+		return true
+	})
+	return
+}
+
 func (a *AntigenPool) SampleProteins(ctx context.Context, sampleDuration time.Duration, maxSamples int) (proteins []Protein) {
 	ctx, cancel := context.WithTimeout(ctx, sampleDuration)
 	defer cancel()
