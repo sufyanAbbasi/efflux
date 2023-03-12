@@ -268,6 +268,8 @@ func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
 	if c.Organ() == nil {
 		return false
 	}
+	// Antibodies bind to receptors and cause damage.
+	// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4159104/
 	hasAntibodies := c.antibodyLoad != nil && c.antibodyLoad.concentration > 0
 	waste := c.Organ().materialPool.GetWaste(ctx)
 	c.Organ().materialPool.PutWaste(waste)
@@ -427,6 +429,8 @@ func (c *Cell) ResetResourceNeed() {
 		fallthrough
 	case Podocyte:
 		fallthrough
+	case Pneumocyte:
+		fallthrough
 	case Hemocytoblast:
 		fallthrough
 	case Lymphoblast:
@@ -454,11 +458,6 @@ func (c *Cell) ResetResourceNeed() {
 	case EffectorBLymphocyte:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
-			glucose: 0,
-		}
-	case Pneumocyte:
-		c.resourceNeed = &ResourceBlob{
-			o2:      CELLULAR_TRANSPORT_O2,
 			glucose: 0,
 		}
 	case RedBlood:
@@ -940,7 +939,7 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		e.organ.materialPool.PutHormone(hormone)
-		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD
+		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD || hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD
 	default:
 		ligand := e.Organ().materialPool.GetLigand(ctx)
 		defer e.Organ().materialPool.PutLigand(ligand)
@@ -1138,6 +1137,22 @@ func (i *Leukocyte) IsAntigen(antigen *Antigen) bool {
 	return false
 }
 
+func (i *Leukocyte) FoundAntigenCytokine() bool {
+	_, concentrations := i.GetNearestCytokines([]CytokineType{
+		cell_stressed,
+		antigen_present,
+	})
+	foundCytokine := false
+	for i := range concentrations {
+		for j := range concentrations[i] {
+			if concentrations[i][j] > 0 {
+				foundCytokine = true
+			}
+		}
+	}
+	return foundCytokine
+}
+
 func (i *Leukocyte) Trap(c CellActor) {
 	c.MoveToPoint(i.Position())
 }
@@ -1254,6 +1269,7 @@ func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 }
 
 func (i *Leukocyte) IncreaseInflammation() {
+	fmt.Println(i, "IncreaseInflammation", i.Organ())
 	i.Organ().materialPool.PutLigand(&LigandBlob{
 		inflammation: LIGAND_INFLAMMATION_LEUKOCYTE,
 	})
@@ -1412,15 +1428,19 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	// It's bacteria, time to kill.
 	// There are three modes of killing for neutrophils:
 	//  1 - Phagocytosis: If the bacteria is covered opsonins (complements
-	//      bound to parts of the bacteria), then the neutrophil can consume
-	//      it. We won't have complements, so we'll simulate that with by
-	//      checking if the bacteria has been around for some time.
+	//      bound to parts of the bacteria) or antibodies, then the neutrophil
+	//      can consume it. We won't have complements, so we'll simulate that
+	//      with by checking if the bacteria has been around for some time.
 	//  2 - Degranulations: Release cytotoxic chemicals to cause damage.
 	//  3 - Neutrophil Extracellular Traps: Trap bacteria in a web of innards
 	//      made of DNA and toxins to keep them in place and cause damage. If
 	//      there is a high concentration of antigen_present cytokine, then
 	//      NETosis is triggered, or its nearing the end of its life.
 	antigenPresentConcentration := n.GetCytokineConcentrationAt(antigen_present, c.Position())
+	// Check if pathogen has been covered in antibodies.
+	hasAntibodies := c.AntibodyLoad() != nil && c.AntibodyLoad().concentration > 0
+	// Check if enough time has passed that the pathogen is covered in opsonins.
+	opsosonized := c.SpawnTime().Add(NEUTROPHIL_OPSONIN_TIME).Before(time.Now())
 	if !n.inNETosis && (antigenPresentConcentration >= NEUTROPHIL_NETOSIS_THRESHOLD ||
 		n.TimeLeft() < NEUTROPHIL_LIFE_SPAN/3) {
 		n.inNETosis = true
@@ -1430,8 +1450,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	if n.inNETosis {
 		n.Trap(c)
 		c.IncurDamage(NEUTROPHIL_NET_DAMAGE)
-	} else if c.SpawnTime().Add(NEUTROPHIL_OPSONIN_TIME).Before(time.Now()) {
-		// Enough time has passed that bacteria should be covered in opsonins.
+	} else if opsosonized || hasAntibodies {
 		// Can perform phagocytosis without NET, which is insta kill.
 		n.Trap(c)
 		c.Apoptosis()
@@ -1480,6 +1499,11 @@ type MacrophageMode int
 
 type Macrophage struct {
 	*Leukocyte
+	activationTime time.Time
+}
+
+func (m *Macrophage) IsActivated() bool {
+	return time.Until(m.activationTime.Add(MACROPHAGE_ACTIVATION_COOLDOWN)) > 0
 }
 
 func (m *Macrophage) Start(ctx context.Context) {
@@ -1497,32 +1521,30 @@ func (m *Macrophage) DoesWork() bool {
 }
 
 func (m *Macrophage) DoWork(ctx context.Context) {
-	_, concentrations := m.GetNearestCytokines([]CytokineType{
-		cell_stressed,
-		antigen_present,
-	})
-	foundCytokine := false
-	for i := range concentrations {
-		for j := range concentrations[i] {
-			if concentrations[i][j] > 0 {
-				foundCytokine = true
-			}
-		}
+	foundCytokine := m.FoundAntigenCytokine()
+	if foundCytokine {
+		m.activationTime = time.Now()
 	}
-	if !foundCytokine {
+	_, foundSelf, _ := m.SampleProteins(ctx, true)
+	if m.IsActivated() {
+		m.Organ().materialPool.PutHormone(&HormoneBlob{
+			macrophage_csf:  HORMONE_MACROPHAGE_DROP,
+			granulocyte_csf: HORMONE_MACROPHAGE_DROP,
+			interleukin_3:   HORMONE_MACROPHAGE_DROP,
+		})
+	} else {
 		// Reduce inflammation.
 		ligand := m.Organ().materialPool.GetLigand(ctx)
 		if ligand.inflammation > MACROPHAGE_INFLAMMATION_CONSUMPTION {
 			ligand.inflammation -= MACROPHAGE_INFLAMMATION_CONSUMPTION
 		}
 		m.Organ().materialPool.PutLigand(ligand)
-	}
-	_, foundSelf, _ := m.SampleProteins(ctx, true)
-	if foundSelf {
-		// Found a dead cell. Signal growth.
-		m.Organ().materialPool.PutLigand(&LigandBlob{
-			growth: MACROPHAGE_STIMULATE_CELL_GROWTH,
-		})
+		if foundSelf {
+			// Found a dead cell. Signal growth.
+			m.Organ().materialPool.PutLigand(&LigandBlob{
+				growth: MACROPHAGE_STIMULATE_CELL_GROWTH,
+			})
+		}
 	}
 }
 
@@ -1531,27 +1553,23 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	if antigen.mollecular_pattern != BACTERIA_MOLECULAR_MOTIF {
 		return
 	}
-	// It's bacteria, time to kill.
+	// Found non-self.
+
 	// Macrophage have one basic attack: phagocytosis. But when no pathogen is
 	// present, they have to suppress the inflammation response.
-	m.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
-	m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
-	m.IncreaseInflammation()
-	ligand := m.Organ().materialPool.GetLigand(ctx)
-	defer m.Organ().materialPool.PutLigand(ligand)
-	// If inflammation is high, promote leukocyte growth.
-	if ligand.inflammation > MACROPHAGE_PROMOTE_GROWTH_THRESHOLD {
-		m.Organ().materialPool.PutHormone(&HormoneBlob{
-			macrophage_csf:  HORMONE_MACROPHAGE_DROP,
-			granulocyte_csf: HORMONE_MACROPHAGE_DROP,
-			interleukin_3:   HORMONE_MACROPHAGE_DROP,
-		})
-	}
+	// However, in order to become potent killers, they must be activated by
+	// a cytokines produced by other immune cells.
+	// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2724991/
 	// Phagocytosis.
-	m.Trap(c)
-	c.Apoptosis()
-	// Pick up protein signatures for presentation.
-	m.mhc_ii.SetProteins(antigen.proteins)
+	if m.IsActivated() {
+		// It's bacteria, time to kill.
+		m.Trap(c)
+		c.Apoptosis()
+		// Pick up protein signatures for presentation.
+		m.mhc_ii.SetProteins(antigen.proteins)
+		m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		m.IncreaseInflammation()
+	}
 }
 
 func CopyMacrophage(base *Macrophage) *Macrophage {
@@ -1615,7 +1633,7 @@ func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
 	// Also kill if no antigen is presented, and kill if it has antibodies.
 	hasAntibodies := c.AntibodyLoad() != nil && c.AntibodyLoad().concentration > 0
 	cell_damaged := c.Damage() > NATURAL_KILLER_DAMAGE_KILL_THRESHOLD
-	if antigen == nil || !n.VerifySelf(antigen) || hasAntibodies || cell_damaged {
+	if antigen == nil || (!n.VerifySelf(antigen) && cell_damaged) || hasAntibodies {
 		n.Execute(c)
 	}
 }
@@ -1679,7 +1697,7 @@ func (d *DendriticCell) DoesWork() bool {
 
 func (d *DendriticCell) DoWork(ctx context.Context) {
 	_, _, foundOther := d.SampleProteins(ctx, true)
-	if foundOther {
+	if foundOther && d.FoundAntigenCytokine() {
 		d.IncreaseInflammation()
 	}
 	// Looking for Virgin T Cells to present to, so draw them closer.
@@ -1843,12 +1861,14 @@ func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
 		t.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		t.IncreaseInflammation()
+		fmt.Println(t, "found", c, c.Organ(), c.Render().id)
 		return
 	}
 	switch c.CellType() {
 	case Macrophagocyte:
 		if m, ok := c.(*Macrophage); ok {
 			m.mhc_ii.SetPresented(t.mhc_ii.GetProteins())
+			m.activationTime = time.Now()
 		}
 	case BLymphocyte:
 		if b, ok := c.(*BCell); ok {
@@ -1912,6 +1932,7 @@ func (t *KillerTCell) Interact(ctx context.Context, c CellActor) {
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
 		t.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 		t.IncreaseInflammation()
+		fmt.Println(t, "found", c, c.Organ(), c.Render().id)
 		return
 	}
 	// Else, check that this cell is presenting an antigen that it recognizes.
@@ -2167,7 +2188,7 @@ func (p *ProkaryoticCell) Mitosis(ctx context.Context) bool {
 	if p.organ == nil {
 		return false
 	}
-	MakeTransportRequest(p.organ.transportUrl, p.cellType.String(), p.dna, p.cellType, nothing, string(p.render.id), time.Now(), p.transportPath, p.wantPath, nil)
+	MakeTransportRequest(p.organ.transportUrl, p.dna.name, p.dna, p.cellType, nothing, string(p.render.id), time.Now(), p.transportPath, p.wantPath, nil)
 	return true
 }
 

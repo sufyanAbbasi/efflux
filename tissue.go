@@ -308,7 +308,7 @@ func (t *Tissue) GetInteractions(ctx context.Context, r *Renderable) (interactio
 						interactionMap: map[RenderID]CellActor{},
 					})
 					interactionPool := pool.(*InteractionPool)
-					if c := interactionPool.Get(); c != nil && c.Render().position.Eq(points[i]) {
+					if c := interactionPool.Get(); c != nil && c.Organ() != nil && c.Render().position.Eq(points[i]) {
 						interactionsChan <- c
 					} else if c != nil {
 						interactionPool.Delete(c.Render().id)

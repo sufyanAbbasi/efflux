@@ -526,10 +526,6 @@ func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Conn
 						manager.completedCount++
 						if finishedWork.status != 200 {
 							manager.completedFailureCount++
-							// Need more workers to complete the job.
-							n.materialPool.PutLigand(&LigandBlob{
-								growth: 1,
-							})
 						}
 						manager.Unlock()
 					case <-ctx.Done():

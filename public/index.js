@@ -374,7 +374,7 @@ class Render {
                 <a-sphere
                     id="${id}"
                     class="cell disposable"
-                    radius="1"
+                    radius="${getSize(id)}"
                     color="${color}"
                     position="${x} ${-y} 0">
                 </a-sphere>
@@ -444,6 +444,21 @@ function getCellColor(id) {
         case 'Hemocytoblast':
         default:
             return 'red';
+        }
+}
+
+function getSize(id) {
+    if (!id) {
+        return 1;
+    }
+    const match = id.match(getCellType) || []
+    switch (match[1]) {
+        case 'Bacteria':
+            return 0.5;
+        case 'Macrophagocyte':
+            return 1.25;
+        default:
+            return 1;
         }
 }
 

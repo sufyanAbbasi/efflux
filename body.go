@@ -108,7 +108,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Bacteroidota,
 	}
 	counts = []int{
-		1, // Gut
+		0, // Gut TODO: handle gut bacteria
 	}
 	names := []string{
 		"Bacteroides",
@@ -130,8 +130,8 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		ViralLoadCarrier,
 	}
 	counts = []int{
+		5,
 		0,
-		10,
 	}
 	names = []string{
 		"Clostridium tetani",
@@ -167,7 +167,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		0,
 		0,
 		0,
-		5,
+		0,
 	}
 	for i, cellType := range cellTypes {
 		for j := 0; j < counts[i]; j++ {

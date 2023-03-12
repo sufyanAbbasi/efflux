@@ -16,8 +16,18 @@ type StateDiagram struct {
 	current *StateNode
 }
 
-func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
+func (s *StateDiagram) Run(ctx context.Context, cell CellActor) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
+	// Cell may be killed during the execution of this function.
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				panic(r)
+			}
+		}
+	}()
 	defer cancel()
 	ticker := time.NewTicker(CELL_CLOCK_RATE)
 	if s.root != nil {
@@ -46,6 +56,7 @@ func (s *StateDiagram) Run(ctx context.Context, cell CellActor) {
 			}
 		}
 	}
+	return nil
 }
 
 func (s *StateDiagram) GetLastNode() *StateNode {
@@ -538,8 +549,6 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	}
 	if c.CanMove() {
 		switch c.CellType() {
-		case Neutrocyte:
-			fallthrough
 		case VirginTLymphocyte:
 			fallthrough
 		case BLymphocyte:
@@ -550,6 +559,8 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 				},
 			}
 			currNode = currNode.next
+		case Neutrocyte:
+			fallthrough
 		case Macrophagocyte:
 			fallthrough
 		case Dendritic:
