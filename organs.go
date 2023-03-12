@@ -137,6 +137,7 @@ const (
 	lymphatic
 	muscular
 	skeletal
+	gut_lining
 	blood_brain_barrier
 )
 

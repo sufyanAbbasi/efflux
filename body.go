@@ -108,7 +108,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 		Bacteroidota,
 	}
 	counts = []int{
-		0, // Gut TODO: handle gut bacteria
+		1, // Gut
 	}
 	names := []string{
 		"Bacteroides",
@@ -367,12 +367,12 @@ func GenerateBody(ctx context.Context) *Body {
 
 	// Gut
 	gut := InitializeNewNode(ctx, b.Graph, "Gut", false)
-	ConnectNodes(ctx, gut, bloodTorso, cardiovascular, muscular)
-	ConnectNodes(ctx, gut, lymphTorso, lymphatic, muscular)
-	ConnectNodes(ctx, gut, muscleLeftArm, muscular, muscular)
-	ConnectNodes(ctx, gut, muscleRightArm, muscular, muscular)
-	ConnectNodes(ctx, gut, muscleLeftLeg, muscular, muscular)
-	ConnectNodes(ctx, gut, muscleRightLeg, muscular, muscular)
+	ConnectNodes(ctx, gut, bloodTorso, cardiovascular, gut_lining)
+	ConnectNodes(ctx, gut, lymphTorso, lymphatic, gut_lining)
+	ConnectNodes(ctx, gut, muscleLeftArm, muscular, gut_lining)
+	ConnectNodes(ctx, gut, muscleRightArm, muscular, gut_lining)
+	ConnectNodes(ctx, gut, muscleLeftLeg, muscular, gut_lining)
+	ConnectNodes(ctx, gut, muscleRightLeg, muscular, gut_lining)
 	b.gutNodes = append(b.gutNodes, gut)
 
 	b.GenerateCellsAndStart(ctx)

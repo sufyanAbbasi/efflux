@@ -345,6 +345,11 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		})
 	case Podocyte:
 		waste := c.organ.materialPool.GetWaste(ctx)
+		if waste.creatinine > CREATININE_GROWTH_THRESHOLD {
+			c.organ.materialPool.PutLigand(&LigandBlob{
+				growth: CREATININE_LIGAND_GROWTH,
+			})
+		}
 		if waste.creatinine <= CREATININE_FILTRATE {
 			waste.creatinine = 0
 		} else {
@@ -753,6 +758,8 @@ func Transport(c CellActor) bool {
 		case blood_brain_barrier:
 			fallthrough
 		case neuronal:
+			fallthrough
+		case gut_lining:
 			// Pass
 		default:
 			if len(wantEdges) > 0 {
@@ -939,7 +946,7 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		e.organ.materialPool.PutHormone(hormone)
-		return hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD || hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD || hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD
+		fallthrough
 	default:
 		ligand := e.Organ().materialPool.GetLigand(ctx)
 		defer e.Organ().materialPool.PutLigand(ligand)
