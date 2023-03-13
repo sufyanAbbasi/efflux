@@ -688,10 +688,6 @@ func BacteriaConsume(ctx context.Context, cell CellActor) bool {
 	return true
 }
 
-func BacteriaShouldTransport(ctx context.Context, cell CellActor) bool {
-	return true
-}
-
 func MakeStateDiagramByProkaryote(c CellActor, dna *DNA) *StateDiagram {
 	s := &StateDiagram{
 		root: &StateNode{
@@ -721,7 +717,7 @@ func MakeStateDiagramByProkaryote(c CellActor, dna *DNA) *StateDiagram {
 	if c.CanTransport() {
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
-				action:   BacteriaShouldTransport,
+				action:   ShouldTransport,
 				proteins: GenerateRandomProteinPermutation(dna),
 			},
 		}

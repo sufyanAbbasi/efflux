@@ -127,17 +127,21 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	node.verbose = true
 	cellTypes = []CellType{
 		Bacteria,
+		Bacteria,
 		ViralLoadCarrier,
 	}
 	counts = []int{
 		0,
-		11,
+		10,
+		0,
 	}
 	names = []string{
 		"Clostridium tetani",
+		"Streptococcus pneumoniae",
 		"SARS-COV-2",
 	}
 	dna := []*DNA{
+		MakeDNA(BACTERIA_DNA, names[0]),
 		MakeDNA(BACTERIA_DNA, names[0]),
 	}
 	virusDNA := MakeDNA(VIRUS_RNA, names[1])

@@ -811,6 +811,9 @@ func Transport(c CellActor) bool {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
 	}
+	if c.CellType() == Bacteria {
+		fmt.Println("Bacteria transported to", edge.transportUrl)
+	}
 	return true
 }
 
