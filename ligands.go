@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"sync"
 )
 
@@ -251,8 +250,7 @@ func (p *ResourcePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Fatal("ResourcePool canceled")
-			return
+			panic("ResourcePool canceled")
 		case r := <-p.resourceChan:
 			p.resources.Add(r)
 		case <-p.wantChan:
@@ -294,8 +292,7 @@ func (p *WastePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Fatal("WastePool canceled")
-			return
+			panic("WastePool canceled")
 		case r := <-p.wasteChan:
 			p.wastes.Add(r)
 		case <-p.wantChan:
@@ -337,8 +334,7 @@ func (p *LigandPool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Fatal("LigandPool canceled")
-			return
+			panic("LigandPool canceled")
 		case r := <-p.ligandChan:
 			p.ligands.Add(r)
 		default:
@@ -381,8 +377,7 @@ func (p *HormonePool) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Fatal("HormonePool")
-			return
+			panic("HormonePool")
 		case r := <-p.hormoneChan:
 			p.hormones.Add(r)
 		default:

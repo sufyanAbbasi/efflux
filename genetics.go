@@ -83,6 +83,19 @@ func MakeDNAFromRequest(request TransportRequest) (*DNA, error) {
 	return dna, nil
 }
 
+func MakeVirusDNA(name string, targetCellType CellType) *DNA {
+	virusDNA := MakeDNA(VIRUS_RNA, name)
+	for foundType := CellType(0); targetCellType != foundType; foundType = CopyViralLoadCarrier(&VirusCarrier{
+		Cell: &Cell{
+			dna: virusDNA,
+		},
+		virus: &Virus{},
+	}).virus.targetCellType {
+		virusDNA = MakeDNA(VIRUS_RNA, name)
+	}
+	return virusDNA
+}
+
 func (d *DNA) Initialize() {
 	d.selfProteins = d.GenerateSelfProteins()
 	switch d.dnaType {
@@ -119,7 +132,20 @@ func (d *DNA) GenerateSelfProteins() []Protein {
 
 	// Skip first two since they repeat.
 	for i := 2; i < len(hash)/2; i++ {
-		protein := Protein(binary.LittleEndian.Uint16(hash[i*2:]))
+		p := binary.LittleEndian.Uint16(hash[i*2:])
+		switch d.dnaType {
+		case HUMAN_DNA:
+			if p < EUKARYOTIC_PROTEIN_START || p > EUKARYOTIC_PROTEIN_RANGE+EUKARYOTIC_PROTEIN_START {
+				p *= EUKARYOTIC_PROTEIN_START / p
+			}
+		case BACTERIA_DNA:
+			if p < PROKARYOTIC_PROTEIN_START || p > PROKARYOTIC_PROTEIN_RANGE+PROKARYOTIC_PROTEIN_START {
+				p /= p / (PROKARYOTIC_PROTEIN_RANGE + PROKARYOTIC_PROTEIN_START)
+			}
+		case VIRUS_RNA:
+			// Do nothing.
+		}
+		protein := Protein(p)
 		proteins = append(proteins, protein)
 	}
 	return proteins

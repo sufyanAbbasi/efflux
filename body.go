@@ -103,15 +103,35 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	// Generate Prokaryotic Cells
 	nodeTypes = [][]*Node{
 		b.gutNodes,
+		b.gutNodes,
+		b.gutNodes,
+		b.gutNodes,
+		b.gutNodes,
+		b.gutNodes,
 	}
 	cellTypes = []CellType{
 		Bacteroidota,
+		Bacteroidota,
+		Bacteroidota,
+		Bacteroidota,
+		Bacteroidota,
+		Bacteroidota,
 	}
 	counts = []int{
-		1, // Gut
+		1,
+		1,
+		1,
+		1,
+		1,
+		1,
 	}
 	names := []string{
-		"Bacteroides",
+		"Adolescentis Animalis",
+		"Bifidum",
+		"Breve",
+		"Acidophilus",
+		"Johnsonii",
+		"Delbrueckii",
 	}
 
 	for i, nodes := range nodeTypes {
@@ -133,7 +153,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	counts = []int{
 		0,
 		10,
-		0,
+		1,
 	}
 	names = []string{
 		"Clostridium tetani",
@@ -142,25 +162,15 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	dna := []*DNA{
 		MakeDNA(BACTERIA_DNA, names[0]),
-		MakeDNA(BACTERIA_DNA, names[0]),
+		MakeDNA(BACTERIA_DNA, names[1]),
+		MakeVirusDNA(names[2], Pneumocyte),
 	}
-	virusDNA := MakeDNA(VIRUS_RNA, names[1])
-	targetCellType := Pneumocyte
-	for foundType := CellType(0); targetCellType != foundType; foundType = CopyViralLoadCarrier(&VirusCarrier{
-		Cell: &Cell{
-			dna: virusDNA,
-		},
-		virus: &Virus{},
-	}).virus.targetCellType {
-		virusDNA = MakeDNA(VIRUS_RNA, names[1])
-	}
-	dna = append(dna, virusDNA)
 	for i, cellType := range cellTypes {
 		for j := 0; j < counts[i]; j++ {
 			MakeTransportRequest(node.transportUrl, names[i], dna[i], cellType, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 		}
 	}
-	// Immune cells.
+	// Immune cell test.
 	cellTypes = []CellType{
 		Neutrocyte,
 		Macrophagocyte,

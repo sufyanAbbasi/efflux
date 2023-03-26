@@ -224,7 +224,7 @@ func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
 
 func Apoptosis(ctx context.Context, cell CellActor) bool {
 	fmt.Println(cell, " Died in", cell.Organ())
-	cell.Apoptosis()
+	cell.Apoptosis(true)
 	return false
 }
 

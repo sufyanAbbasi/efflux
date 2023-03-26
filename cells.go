@@ -125,7 +125,7 @@ type CellActor interface {
 	Repair(int)
 	ShouldIncurDamage(context.Context) bool
 	IncurDamage(int)
-	Apoptosis()
+	Apoptosis(bool)
 	IsApoptosis() bool
 	IsAerobic() bool
 	IsOxygenated() bool
@@ -295,16 +295,18 @@ func (c *Cell) CleanUp() {
 	c.organ = nil
 }
 
-func (c *Cell) Apoptosis() {
+func (c *Cell) Apoptosis(release bool) {
 	if c.Verbose() {
 		fmt.Println("Apoptosis:", c, "in", c.organ)
 	}
-	// Deposit viral load and proteins into protein pool.
-	if c.organ != nil && c.organ.antigenPool != nil {
-		if c.viralLoad != nil {
-			c.organ.antigenPool.DepositViralLoad(c.viralLoad)
+	if release {
+		// Deposit viral load and proteins into protein pool.
+		if c.organ != nil && c.organ.antigenPool != nil {
+			if c.viralLoad != nil {
+				c.organ.antigenPool.DepositViralLoad(c.viralLoad)
+			}
+			go c.organ.antigenPool.DepositProteins(c.dna.selfProteins)
 		}
-		go c.organ.antigenPool.DepositProteins(c.dna.selfProteins)
 	}
 	c.CleanUp()
 }
@@ -1075,6 +1077,17 @@ func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
 	return i.Cell.ShouldIncurDamage(ctx) || i.TimeLeft() < 0
 }
 
+func (i *Leukocyte) IncurDamage(damage int) {
+	i.Cell.IncurDamage(damage)
+	// Don't cause inflammation.
+}
+
+func (i *Leukocyte) Apoptosis(release bool) {
+	// Gracefully apoptosis if told to do so or lifetime is over.
+	shouldRelease := release && i.TimeLeft() > 0
+	i.Cell.Apoptosis(shouldRelease)
+}
+
 func (i *Leukocyte) TimeLeft() time.Duration {
 	return time.Until(i.spawnTime.Add(i.lifeSpan))
 }
@@ -1325,12 +1338,7 @@ func (i *Leukocyte) SampleAntigen(a *Antigen, shouldPresent bool) (proteins []Pr
 
 func (i *Leukocyte) Execute(c CellActor) {
 	// Gracefully destroy cell without releasing viral load.
-	if c.ViralLoad() != nil {
-		c.ViralLoad().Lock()
-		c.ViralLoad().concentration = 0
-		c.ViralLoad().Unlock()
-	}
-	c.Apoptosis()
+	c.Apoptosis(false)
 	fmt.Println(i, "hit the kill switch on", c)
 }
 
@@ -1461,7 +1469,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	} else if opsosonized || hasAntibodies {
 		// Can perform phagocytosis without NET, which is insta kill.
 		n.Trap(c)
-		c.Apoptosis()
+		c.Apoptosis(false)
 	} else {
 		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 	}
@@ -1572,7 +1580,7 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 	if m.IsActivated() {
 		// It's bacteria, time to kill.
 		m.Trap(c)
-		c.Apoptosis()
+		c.Apoptosis(false)
 		// Pick up protein signatures for presentation.
 		m.mhc_ii.SetProteins(antigen.proteins)
 		m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
@@ -1721,7 +1729,7 @@ func (d *DendriticCell) Interact(ctx context.Context, c CellActor) {
 		d.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		d.IncreaseInflammation()
 		if c.Damage() >= DENDRITIC_PHAGOCYTOSIS_DAMAGE_TRESHOLD {
-			c.Apoptosis()
+			c.Apoptosis(false)
 			d.SampleAntigen(antigen, true)
 		}
 		return
