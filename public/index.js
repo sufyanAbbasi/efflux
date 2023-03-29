@@ -1,5 +1,8 @@
 import {html, render} from 'https://unpkg.com/lit-html?module';
 
+goog.require('proto.efflux.RenderableSocketData');
+goog.require('proto.efflux.StatusSocketData');
+
 const NodeMap = new Map();
 const PendingCloseSockets = new WeakMap();
 const LastRenderTime = new Map();
@@ -95,12 +98,14 @@ class Node {
         };
     }
 
-    getStatus({data}) {
+    async getStatus({data}) {
         try {
-            data = JSON.parse(data);
+            let arrayBuffer = await data.arrayBuffer();
+            data = proto.efflux.StatusSocketData.deserializeBinary(arrayBuffer).toObject();
         } catch (e) {
-            console.error(e);
+            // console.error(e);
             data = null;
+            return;
         }
         this.status = data;
         this.name = data.name ? `${data.name} (${this.id})` : 'Unknown';
@@ -109,8 +114,8 @@ class Node {
             this.renderOption();
         }
 
-        if (this.status.connections) {
-            for (const address of this.status.connections) {
+        if (this.status.connectionsList) {
+            for (const address of this.status.connectionsList) {
                 if (!NodeMap.has(address)) {
                     NodeMap.set(address, new Node(address));
                 }
@@ -121,7 +126,7 @@ class Node {
                 }
             }
         }
-        this.updateLabel(this.status.workStatus, this.status.materialStatus);
+        this.updateLabel(this.status.workStatusList, this.status.materialStatus);
     }
 
     updateLabel(workStatuses, materialStatus) {
@@ -134,15 +139,17 @@ class Node {
             labels.push(`${makePadding('Work')}|${makePadding('Requests')}|${makePadding('Successes')}|${makePadding('Failures')}|${makePadding('Completed')}`);
             labels.push(''.padStart(55, '-'));
             for (const {workType, requestCount, successCount, failureCount, completedCount, completedFailureCount} of workStatuses.sort((a, b) => ('' + a.workType).localeCompare(b.workType))) {
-                labels.push(`${makePadding(workType)}|${makePadding(requestCount)}|${makePadding(successCount)}|${makePadding(failureCount)}|${makePadding(`${completedCount} (${completedFailureCount})`)}`);
+                if (workType) {
+                    labels.push(`${makePadding(workType)}|${makePadding(requestCount || 0)}|${makePadding(successCount || 0)}|${makePadding(failureCount || 0)}|${makePadding(`${completedCount || 0} (${completedFailureCount || 0})`)}`);
+                }
             }
         }
         const makePadding = (str) => String(str).padStart(5).padEnd(10);
-        labels.push(`${makePadding('o2: ' + materialStatus.o2)} ${makePadding('glucose: ' + materialStatus.glucose)} ${makePadding('vitamin: ' + materialStatus.vitamin)}`);
-        labels.push(`${makePadding('co2: ' + materialStatus.co2)} ${makePadding('creatinine: ' + materialStatus.creatinine)}`);
-        labels.push(`${makePadding('growth: ' + materialStatus.growth)} ${makePadding('hunger: ' + materialStatus.hunger)} ${makePadding('asphyxia: ' + materialStatus.asphyxia)} ${makePadding('inflammation: ' + materialStatus.inflammation)}`);
-        labels.push(`${makePadding('g_csf: ' + materialStatus.g_csf)} ${makePadding('m_csf: ' + materialStatus.m_csf)} ${makePadding('il_3: ' + materialStatus.il_3)} ${makePadding('il_2: ' + materialStatus.il_2)}`);
-        labels.push(`${makePadding('viral_load: ' + materialStatus.viral_load)} ${makePadding('antibody_load: ' + materialStatus.antibody_load)}`);
+        labels.push(`${makePadding('o2: ' + (materialStatus.o2 || 0))} ${makePadding('glucose: ' + (materialStatus.glucose || 0))} ${makePadding('vitamin: ' + (materialStatus.vitamin || 0))}`);
+        labels.push(`${makePadding('co2: ' + (materialStatus.co2 || 0))} ${makePadding('creatinine: ' + (materialStatus.creatinine || 0))}`);
+        labels.push(`${makePadding('growth: ' + (materialStatus.growth || 0))} ${makePadding('hunger: ' + (materialStatus.hunger || 0))} ${makePadding('asphyxia: ' + (materialStatus.asphyxia || 0))} ${makePadding('inflammation: ' + (materialStatus.inflammation || 0))}`);
+        labels.push(`${makePadding('g_csf: ' + (materialStatus.gCsf || 0))} ${makePadding('m_csf: ' + (materialStatus.mCsf || 0))} ${makePadding('il_3: ' + (materialStatus.il3 || 0))} ${makePadding('il_2: ' + (materialStatus.il2 || 0))}`);
+        labels.push(`${makePadding('viral_load: ' + (materialStatus.viralLoad || 0))} ${makePadding('antibody_load: ' + (materialStatus.antibodyLoad || 0))}`);
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
         if (this.active) {
@@ -201,7 +208,7 @@ class Node {
         let scene = document.querySelector('.render a-scene');
         if (!scene) {
             render(html`<a-scene embedded>
-                <a-assets>
+                <a-assets timeout="10000000">
                     <img id="background" src="background.png">
                 </a-assets>
                 <a-sky color="white"></a-sky>
@@ -214,7 +221,7 @@ class Node {
         }
         this.setUpScene();
         document.querySelector('.render').classList.add('show');
-        await this.render.setupRenderConnection(this.address);
+        await this.render.setupRender(this.address);
     }
 
     async collapseScene() {
@@ -252,8 +259,9 @@ class Render {
         this.activeSocket = null;
     }
 
-    async setupRenderConnection(address) {
-        const socket = new WebSocket(address + '/render')
+    async setupRender(address) {
+        this.setupRenderTexture(address);
+        const socket = new WebSocket(address + '/render/stream')
         try {
             await new Promise((resolve, reject) => {
                 socket.onopen = () => {
@@ -280,6 +288,71 @@ class Render {
         }
     }
 
+    setupRenderTexture(address) {
+        // Load texture from server.
+        const container = document.createElement('div');
+        render(html`
+            <a-plane
+                class="texture disposable"
+                material="src:#background; repeat: 1 1;"
+                height="100"
+                width="100"
+                position="0 0 0"
+                rotation="0 0 0">
+            </a-plane>
+        `, container);
+        const el = container.firstElementChild;
+        const scene = document.querySelector('a-scene');
+        if (!scene) {
+            return;
+        }
+        scene.appendChild(el);
+        return new Promise((resolve, reject) => {
+            const httpAddress = address.replace('wss://', 'https://')
+                                       .replace('ws://', 'http://');
+            const loader = new THREE.TextureLoader();
+            loader.load(`${httpAddress}/render/texture`, 
+                resolve,     // onLoadCallback
+                undefined,   // onProgress, deprecated.
+                reject       // onErrorCallback
+            );
+        })
+        .then((texture) => {
+            try {
+                const mesh = el.getObject3D('mesh');
+                if (mesh) {
+                    mesh.material.map = texture
+                }
+            } catch(e) {
+                // Pass.
+            }
+            // Get the remote image as a Blob with the fetch API
+            return fetch(texture.image.src);
+        })
+        .then((res) => res.blob())
+        .then((data) => {
+            return data.slice(data.size - 48, data.size - 16).text()
+        }).then((metadataJSON) => {
+            try {
+                metadataJSON = JSON.parse(metadataJSON);
+            } catch(e) {
+                console.error('Unable to parse metadata JSON', e);
+                return
+            }
+            let {id, z} = metadataJSON;
+            z = parseInt(z);
+            // e.g. <a-plane material="src:#background; repeat: 1 1;"></a-plane>
+            const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
+            if (el && el.object3D) {
+                el.setAttribute('id', id);
+                el.classList.add(textureType);
+                if (el.object3D) {
+                    el.object3D.position.z = -30 * z;
+                }
+            }
+        });
+    }
+
     close() {
         const toClose = this.activeSocket; 
         this.activeSocket = null;
@@ -287,111 +360,56 @@ class Render {
         return PendingCloseSockets.get(toClose);
     }
 
-    getRender({data}) {
-        if (data instanceof Blob) {
-            const url = URL.createObjectURL(data);
-            const socket = this.activeSocket;
-            const textureLoaded = new Promise((resolve, reject) => {
-                const loader = new THREE.TextureLoader();
-                loader.load(url, 
-                //onLoadCallback
-                resolve,
-                // onProgressCallback - not sure if working
-                undefined,
-                // onErrorCallback
-                reject);
-            });
-            Promise.all([data.slice(data.size - 48, data.size - 16).text(), textureLoaded]).then(([metadataJSON, texture]) => {
-                if (socket !== this.activeSocket) {
-                    return;
-                }
-                try {
-                    metadataJSON = JSON.parse(metadataJSON);
-                } catch(e) {
-                    console.error('Unable to parse metadata JSON', e);
-                    return
-                }
-                let {id, z} = metadataJSON;
-                z = parseInt(z);
-                // e.g. <a-plane material="src:#background; repeat: 1 1;"></a-plane>
-                const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
-                let el = document.querySelector(`#${id}`);
-                if (!el) {
-                    const container = document.createElement('div');
-                    render(html`
-                    <a-plane
-                        id="${id}"
-                        class="texture ${textureType} disposable"
-                        material="src:#background; repeat: 1 1;"
-                        height="100"
-                        width="100"
-                        position="0 0 ${-30 * z}"
-                        rotation="0 0 0">
-                    </a-plane>
-                    `, container);
-                    el = container.firstElementChild;
-                    const scene = document.querySelector('a-scene');
-                    if (!scene) {
-                        return;
-                    }
-                    scene.appendChild(el);
-                }
-                try {
-                    const prevUrl = texture.image?.src;
-                    const mesh = el.getObject3D('mesh');
-                    if (mesh) {
-                        mesh.material.map = texture
-                    }
-                    if (typeof prevUrl == 'string' && prevUrl.startsWith('blob:')) {
-                        URL.revokeObjectURL(prevUrl);
-                    }
-                } catch(e) {
-                    // Pass.
-                }
-            });
+    async getRender({data}) {
+        if (!data instanceof Blob) {
             return;
         }
+        let isRenderableData = false;
         let renderData;
         try {
-            renderData = JSON.parse(data);
+            let arrayBuffer = await data.arrayBuffer();
+            renderData = proto.efflux.RenderableSocketData.deserializeBinary(arrayBuffer).toObject();
+            isRenderableData = !!renderData.id;
         } catch (e) {
-            console.error(e);
-            renderData = null;
+            // console.error("Render Error:", e);
+            return;
         }
-        const {
-            id,
-            visible,
-            x,
-            y,
-            z,
-        } = renderData;
-        // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
-        let el = document.querySelector(`#${id}`);
-        if (!el) {
-            const color = getCellColor(id);
-            const container = document.createElement('div');
-            render(html`
-                <a-sphere
-                    id="${id}"
-                    class="cell disposable"
-                    radius="${getSize(id)}"
-                    color="${color}"
-                    position="${x} ${-y} 0">
-                </a-sphere>
-            `, container);
-            el = container.firstElementChild;
-            const planes = document.querySelectorAll('a-plane');
-            const plane = planes[z] || planes[0];
-            if (!plane) {
-                return;
+        if (isRenderableData) {
+            const {
+                id,
+                visible,
+                position,
+            } = renderData;
+            const {x, y, z} = position;
+            // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+            let el = document.querySelector(`#${id}`);
+            if (!el) {
+                const color = getCellColor(id);
+                const container = document.createElement('div');
+                render(html`
+                    <a-sphere
+                        id="${id}"
+                        class="cell disposable"
+                        radius="${getSize(id)}"
+                        color="${color}"
+                        position="${x} ${-y} 0">
+                    </a-sphere>
+                `, container);
+                el = container.firstElementChild;
+                const planes = document.querySelectorAll('a-plane');
+                const plane = planes[z] || planes[0];
+                if (!plane) {
+                    return;
+                }
+                plane.appendChild(el);
             }
-            plane.appendChild(el);
+            if (el.object3D) {
+                el.object3D.visible = visible;
+                el.object3D.position.set(x, -y, z)
+            }
+            LastRenderTime.set(id, Date.now());
+            return;
         }
-        if (el.object3D) {
-            el.object3D.visible = visible;
-            el.object3D.position.set(x, -y, z)
-        }
-        LastRenderTime.set(id, Date.now());
     }
 }
 
@@ -417,16 +435,14 @@ function getCellColor(id) {
             return 'coral';
         case 'Dendritic':
             return 'teal';
-        case 'Neutrophil':
+        case 'Neutrocyte':
             return 'yellow';
-        case 'NaturalKiller':
+        case 'NaturalKillerCell':
             return 'lime';
         case 'VirginTLymphocyte':
             return 'turquoise';
         case 'HelperTLymphocyte':
             return 'mediumseagreen';
-        case 'KillerTLymphocyte':
-            return 'seagreen';
         case 'KillerTLymphocyte':
             return 'seagreen';
         case 'BLymphocyte':

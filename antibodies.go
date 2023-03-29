@@ -16,11 +16,6 @@ type AntigenPool struct {
 	infectablePool *sync.Pool
 }
 
-type AntigenBlobData struct {
-	AntibodyProteins       []Protein
-	AntibodyConcentrations []int64
-}
-
 func InitializeAntigenPool(ctx context.Context) *AntigenPool {
 	antigenPool := &AntigenPool{
 		viralLoads:     &sync.Map{},
@@ -181,34 +176,34 @@ func (a *AntigenPool) SampleProteins(ctx context.Context, sampleDuration time.Du
 	}
 }
 
-func (a *AntigenPool) GetDiffusionLoad() AntigenBlobData {
-	var antibodyProteins []Protein
+func (a *AntigenPool) GetDiffusionLoad() *AntigenBlobSocketData {
+	var antibodyProteins []int32
 	var antibodyConcentrations []int64
 	a.antibodyLoads.Range(func(_, a any) bool {
 		antibodyLoad := a.(*AntibodyLoad)
 		antibodyLoad.Lock()
 		if antibodyLoad.concentration > 0 {
 			antibodyLoad.concentration /= 2
-			antibodyProteins = append(antibodyProteins, antibodyLoad.targetProtein)
+			antibodyProteins = append(antibodyProteins, int32(antibodyLoad.targetProtein))
 			antibodyConcentrations = append(antibodyConcentrations, antibodyLoad.concentration)
 		}
 		antibodyLoad.Unlock()
 		return true
 	})
-	return AntigenBlobData{
+	return &AntigenBlobSocketData{
 		AntibodyProteins:       antibodyProteins,
 		AntibodyConcentrations: antibodyConcentrations,
 	}
 }
 
-func (a *AntigenPool) PutDiffusionLoad(d AntigenBlobData) {
+func (a *AntigenPool) PutDiffusionLoad(d *AntigenBlobSocketData) {
 	for i, antibodyProtein := range d.AntibodyProteins {
 		concentration := int64(0)
 		if i < len(d.AntibodyConcentrations) {
 			concentration = d.AntibodyConcentrations[i]
 		}
 		a.DepositAntibodyLoad(&AntibodyLoad{
-			targetProtein: antibodyProtein,
+			targetProtein: Protein(antibodyProtein),
 			concentration: concentration,
 		})
 	}

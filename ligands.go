@@ -11,12 +11,6 @@ type ResourceBlob struct {
 	vitamins int
 }
 
-type ResourceBlobData struct {
-	O2       int
-	Glucose  int
-	Vitamins int
-}
-
 func offset(val int) (offset int) {
 	if val%2 == 0 {
 		offset = 1
@@ -81,11 +75,6 @@ func (r *ResourceBlob) Split() *ResourceBlob {
 type WasteBlob struct {
 	co2        int
 	creatinine int
-}
-
-type WasteBlobData struct {
-	CO2        int
-	Creatinine int
 }
 
 func (w *WasteBlob) Add(waste *WasteBlob) {
@@ -163,13 +152,6 @@ type HormoneBlob struct {
 	macrophage_csf  int // Produces Monocyte.
 	interleukin_3   int // Produces Lymphoblast.
 	interleukin_2   int // Induces TCell mitosis.
-}
-
-type HormoneBlobData struct {
-	GranulocyteColonyStimulatingFactor int
-	MacrophageColonyStimulatingFactor  int
-	Interleukin3                       int
-	Interleukin2                       int
 }
 
 func (h *HormoneBlob) Add(hormone *HormoneBlob) {

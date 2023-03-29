@@ -8,12 +8,15 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 type RenderID string
@@ -28,14 +31,6 @@ type Renderable struct {
 	position                  image.Point
 	targetX, targetY, targetZ int
 	lastPositions             *ring.Ring
-}
-
-type RenderableData struct {
-	Id      RenderID `json:"id"`
-	Visible bool     `json:"visible"`
-	X       int      `json:"x"`
-	Y       int      `json:"y"`
-	Z       int      `json:"z"`
 }
 
 func (r *Renderable) SetVisible(visible bool) {
@@ -70,14 +65,14 @@ func (p *InteractionPool) Delete(id RenderID) {
 
 type Tissue struct {
 	bounds        image.Rectangle
-	streamingChan chan chan RenderableData
+	streamingChan chan chan *RenderableSocketData
 	rootMatrix    *ExtracellularMatrix
 }
 
 func InitializeTissue(ctx context.Context) *Tissue {
 	tissue := &Tissue{
 		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
-		streamingChan: make(chan chan RenderableData, STREAMING_BUFFER_SIZE),
+		streamingChan: make(chan chan *RenderableSocketData, STREAMING_BUFFER_SIZE),
 	}
 	tissue.BuildTissue()
 	return tissue
@@ -150,25 +145,20 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 			}
 		}
 	}(connection)
-	streamedTissue := 5
+	ticker := time.NewTicker(RENDER_STREAM_TICK_RATE)
 	for {
-		r := make(chan RenderableData, RENDER_BUFFER_SIZE)
+		r := make(chan *RenderableSocketData, RENDER_BUFFER_SIZE)
+		<-ticker.C
 		select {
 		case <-ctx.Done():
 			return
 		case t.streamingChan <- r:
-			if streamedTissue > 0 {
-				err := t.StreamMatrices(connection)
-				if err != nil {
-					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-						fmt.Printf("error: %v", err)
-					}
-					return
-				}
-				streamedTissue--
-			}
 			for renderable := range r {
-				err := connection.WriteJSON(renderable)
+				out, err := proto.Marshal(renderable)
+				if err != nil {
+					log.Fatalln("Failed to encode renderable:", err)
+				}
+				err = connection.WriteMessage(websocket.BinaryMessage, out)
 				if err != nil {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 						fmt.Printf("error: %v %v", err, renderable)
@@ -182,27 +172,22 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 	}
 }
 
-func (t *Tissue) StreamMatrices(connection *Connection) error {
+func (t *Tissue) RenderRootMatrix(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	matrix := t.rootMatrix
-	for matrix != nil {
-		buf := new(bytes.Buffer)
-		err := png.Encode(buf, matrix)
-		if err != nil {
-			fmt.Printf("Error while encoding png: %v", err)
-			return err
-		}
-		img, err := MakeTitledPng(buf, matrix.RenderMetadata())
-		if err != nil {
-			fmt.Printf("Error while encoding png: %v", err)
-			return err
-		}
-		err = connection.WriteMessage(websocket.BinaryMessage, img.Bytes())
-		if err != nil {
-			return err
-		}
-		matrix = matrix.next
+	buf := new(bytes.Buffer)
+	err := png.Encode(buf, matrix)
+	if err != nil {
+		panic(fmt.Errorf("error while encoding png: %v", err))
 	}
-	return nil
+	img, err := MakeTitledPng(buf, matrix.RenderMetadata())
+	if err != nil {
+		panic(fmt.Errorf("error while encoding png: %v", err))
+	}
+	_, err = w.Write(img.Bytes())
+	if err != nil {
+		panic(fmt.Errorf("error while sending png: %v", err))
+	}
 }
 
 func (t *Tissue) Tick() {
@@ -587,7 +572,7 @@ func (m *ExtracellularMatrix) Tick() {
 	}
 }
 
-func (m *ExtracellularMatrix) Render(renderChan chan RenderableData) {
+func (m *ExtracellularMatrix) Render(renderChan chan *RenderableSocketData) {
 	m.RLock()
 	var attached []*Renderable
 	for _, a := range m.attached {
@@ -600,13 +585,15 @@ func (m *ExtracellularMatrix) Render(renderChan chan RenderableData) {
 	close(renderChan)
 }
 
-func (m *ExtracellularMatrix) RenderObject(r *Renderable) RenderableData {
-	return RenderableData{
-		Id:      r.id,
+func (m *ExtracellularMatrix) RenderObject(r *Renderable) *RenderableSocketData {
+	return &RenderableSocketData{
+		Id:      string(r.id),
 		Visible: r.visible,
-		X:       r.position.X,
-		Y:       r.position.Y,
-		Z:       m.level,
+		Position: &Position{
+			X: int32(r.position.X),
+			Y: int32(r.position.Y),
+			Z: int32(m.level),
+		},
 	}
 }
 

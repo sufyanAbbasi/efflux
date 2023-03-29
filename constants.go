@@ -8,14 +8,14 @@ import (
 const WORK_ENDPOINT = "/work"
 const STATUS_ENDPOINT = "/status"
 const TRANSPORT_ENDPOINT = "/transport"
-const WORLD_ENDPOINT = "/render"
+const WORLD_RENDER_ENDPOINT = "/render/stream"
+const WORLD_TEXTURE_ENDPOINT = "/render/texture"
 
 const ORIGIN = "http://localhost/"
 const URL_TEMPLATE = "http://localhost:%v"
 const WEBSOCKET_TEMPLATE = "ws://localhost:%v"
 const WORK_URL_TEMPLATE = WEBSOCKET_TEMPLATE + WORK_ENDPOINT
 const TRANSPORT_URL_TEMPLATE = URL_TEMPLATE + TRANSPORT_ENDPOINT
-const WORLD_URL_TEMPLATE = WEBSOCKET_TEMPLATE + WORLD_ENDPOINT
 
 const WORLD_BOUNDS = 100
 const NUM_PLANES = 1
@@ -27,6 +27,7 @@ const MAX_RADIUS = WORLD_BOUNDS / 4
 const MAIN_STAGE_RADIUS = WORLD_BOUNDS / 5
 const POSITION_TRACKER_SIZE = 9 * 3
 const SPAWN_DISPLACEMENT = 6
+const RENDER_STREAM_TICK_RATE = time.Second / 15
 
 const PROKARYOTIC_PROTEIN_RANGE = uint16(20000)
 const PROKARYOTIC_PROTEIN_START = uint16(0)

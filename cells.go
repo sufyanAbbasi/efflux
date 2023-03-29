@@ -13,89 +13,6 @@ import (
 	"time"
 )
 
-type CellType int
-
-const (
-	Bacteria     CellType = iota // A baseline prokaryotic cell.
-	Bacteroidota                 // Bacteria that synthesize vitamins in the gut.
-	RedBlood
-	Neuron
-	Cardiomyocyte       // Heart Cell
-	Pneumocyte          // Pulmonary Cell
-	Myocyte             // Muscle Cell
-	Keratinocyte        // Skin Cell
-	Enterocyte          // Gut Lining Cell
-	Podocyte            // Kidney Cell
-	Hemocytoblast       // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
-	Lymphoblast         // Stem Cell, becomes NK, B cells, T cells
-	Myeloblast          // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but not here)
-	Monocyte            // Stem Cell, becomes Macrophages and Dendritic cells
-	Macrophagocyte      // Macrophage
-	Dendritic           // Dendritic Cells
-	Neutrocyte          // Neutrophils
-	NaturalKillerCell   // Natural Killer Cell
-	VirginTLymphocyte   // Virgin T Cell
-	HelperTLymphocyte   // Helper T Cell
-	KillerTLymphocyte   // Killer T Cell
-	BLymphocyte         // B Cell
-	EffectorBLymphocyte // Plasma Cell
-	ViralLoadCarrier    // A dummy cell that carries a virus. Always make sure this is last.
-)
-
-func (c CellType) String() string {
-	switch c {
-	case Bacteria:
-		return "Bacteria"
-	case Bacteroidota:
-		return "Bacteroidota"
-	case ViralLoadCarrier:
-		return "ViralLoadCarrier"
-	case RedBlood:
-		return "RedBlood"
-	case Neuron:
-		return "Neuron"
-	case Cardiomyocyte:
-		return "Cardiomyocyte"
-	case Pneumocyte:
-		return "Pneumocyte"
-	case Myocyte:
-		return "Myocyte"
-	case Keratinocyte:
-		return "Keratinocyte"
-	case Enterocyte:
-		return "Enterocyte"
-	case Podocyte:
-		return "Podocyte"
-	case Hemocytoblast:
-		return "Hemocytoblast"
-	case Lymphoblast:
-		return "Lymphoblast"
-	case Myeloblast:
-		return "Myeloblast"
-	case Monocyte:
-		return "Monocyte"
-	case Macrophagocyte:
-		return "Macrophagocyte"
-	case Dendritic:
-		return "Dendritic"
-	case Neutrocyte:
-		return "Neutrophil"
-	case NaturalKillerCell:
-		return "NaturalKiller"
-	case VirginTLymphocyte:
-		return "VirginTLymphocyte"
-	case HelperTLymphocyte:
-		return "HelperTLymphocyte"
-	case KillerTLymphocyte:
-		return "KillerTLymphocyte"
-	case BLymphocyte:
-		return "BLymphocyte"
-	case EffectorBLymphocyte:
-		return "EffectorBLymphocyte"
-	}
-	return "Unknown"
-}
-
 type CellActor interface {
 	Worker
 	AntigenPresenting
@@ -336,16 +253,16 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	}
 	c.Lock()
 	switch c.cellType {
-	case RedBlood:
+	case CellType_RedBlood:
 		c.organ.materialPool.PutWaste(&WasteBlob{
 			co2: CELLULAR_TRANSPORT_CO2,
 		})
-	case Enterocyte:
+	case CellType_Enterocyte:
 		c.organ.materialPool.PutResource(&ResourceBlob{
 			glucose:  GLUCOSE_INTAKE,
 			vitamins: VITAMIN_INTAKE,
 		})
-	case Podocyte:
+	case CellType_Podocyte:
 		waste := c.organ.materialPool.GetWaste(ctx)
 		if waste.creatinine > CREATININE_GROWTH_THRESHOLD {
 			c.organ.materialPool.PutLigand(&LigandBlob{
@@ -358,7 +275,7 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 			waste.creatinine -= CREATININE_FILTRATE
 		}
 		c.organ.materialPool.PutWaste(waste)
-	case Pneumocyte:
+	case CellType_Pneumocyte:
 		waste := c.organ.materialPool.GetWaste(ctx)
 		if waste.co2 <= CELLULAR_TRANSPORT_CO2 {
 			waste.co2 = 0
@@ -369,20 +286,20 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 		c.organ.materialPool.PutResource(&ResourceBlob{
 			o2: LUNG_O2_INTAKE,
 		})
-	case Cardiomyocyte:
+	case CellType_Cardiomyocyte:
 		request := c.organ.RequestWork(ctx, Work{
-			workType: exhale,
+			workType: WorkType_exhale,
 		})
 		if request.status == 200 {
 			c.organ.materialPool.PutResource(&ResourceBlob{
 				o2: CELLULAR_TRANSPORT_O2,
 			})
 		}
-	case Myocyte:
+	case CellType_Myocyte:
 		fallthrough
-	case Keratinocyte:
+	case CellType_Keratinocyte:
 		fallthrough
-	case Neuron:
+	case CellType_Neuron:
 		fallthrough
 	default:
 	}
@@ -430,57 +347,57 @@ func (c *Cell) CollectResources(ctx context.Context) bool {
 
 func (c *Cell) ResetResourceNeed() {
 	switch c.cellType {
-	case Keratinocyte:
+	case CellType_Keratinocyte:
 		fallthrough
-	case Enterocyte:
+	case CellType_Enterocyte:
 		fallthrough
-	case Podocyte:
+	case CellType_Podocyte:
 		fallthrough
-	case Pneumocyte:
+	case CellType_Pneumocyte:
 		fallthrough
-	case Hemocytoblast:
+	case CellType_Hemocytoblast:
 		fallthrough
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		fallthrough
-	case Myeloblast:
+	case CellType_Myeloblast:
 		fallthrough
-	case Monocyte:
+	case CellType_Monocyte:
 		fallthrough
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		fallthrough
-	case Dendritic:
+	case CellType_Dendritic:
 		fallthrough
-	case Neutrocyte:
+	case CellType_Neutrocyte:
 		fallthrough
-	case NaturalKillerCell:
+	case CellType_NaturalKillerCell:
 		fallthrough
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		fallthrough
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		fallthrough
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		fallthrough
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		fallthrough
-	case EffectorBLymphocyte:
+	case CellType_EffectorBLymphocyte:
 		c.resourceNeed = &ResourceBlob{
 			o2:      0,
 			glucose: 0,
 		}
-	case RedBlood:
+	case CellType_RedBlood:
 		c.resourceNeed = &ResourceBlob{
 			o2:      CELLULAR_TRANSPORT_O2,
 			glucose: CELLULAR_TRANSPORT_GLUCOSE,
 		}
-	case Bacteria:
+	case CellType_Bacteria:
 		fallthrough
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		fallthrough
-	case Neuron:
+	case CellType_Neuron:
 		fallthrough
-	case Cardiomyocyte:
+	case CellType_Cardiomyocyte:
 		fallthrough
-	case Myocyte:
+	case CellType_Myocyte:
 		fallthrough
 	default:
 		c.resourceNeed = &ResourceBlob{
@@ -493,57 +410,57 @@ func (c *Cell) ResetResourceNeed() {
 func (c *Cell) ProduceWaste() {
 	if c.organ.materialPool != nil {
 		switch c.cellType {
-		case Pneumocyte:
+		case CellType_Pneumocyte:
 			fallthrough
-		case Keratinocyte:
+		case CellType_Keratinocyte:
 			fallthrough
-		case Enterocyte:
+		case CellType_Enterocyte:
 			fallthrough
-		case Podocyte:
+		case CellType_Podocyte:
 			fallthrough
-		case RedBlood:
+		case CellType_RedBlood:
 			fallthrough
-		case Hemocytoblast:
+		case CellType_Hemocytoblast:
 			fallthrough
-		case Lymphoblast:
+		case CellType_Lymphoblast:
 			fallthrough
-		case Myeloblast:
+		case CellType_Myeloblast:
 			fallthrough
-		case Monocyte:
+		case CellType_Monocyte:
 			fallthrough
-		case Macrophagocyte:
+		case CellType_Macrophagocyte:
 			fallthrough
-		case Dendritic:
+		case CellType_Dendritic:
 			fallthrough
-		case Neutrocyte:
+		case CellType_Neutrocyte:
 			fallthrough
-		case NaturalKillerCell:
+		case CellType_NaturalKillerCell:
 			fallthrough
-		case VirginTLymphocyte:
+		case CellType_VirginTLymphocyte:
 			fallthrough
-		case HelperTLymphocyte:
+		case CellType_HelperTLymphocyte:
 			fallthrough
-		case KillerTLymphocyte:
+		case CellType_KillerTLymphocyte:
 			fallthrough
-		case BLymphocyte:
+		case CellType_BLymphocyte:
 			fallthrough
-		case EffectorBLymphocyte:
+		case CellType_EffectorBLymphocyte:
 			// No waste produced.
-		case Bacteroidota:
+		case CellType_Bacteroidota:
 			c.organ.materialPool.PutWaste(&WasteBlob{
 				co2: CELLULAR_RESPIRATION_CO2,
 			})
 			c.Organ().materialPool.PutResource(&ResourceBlob{
 				vitamins: BACTERIA_VITAMIN_PRODUCTION,
 			})
-		case Bacteria:
+		case CellType_Bacteria:
 			c.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
 			fallthrough
-		case Cardiomyocyte:
+		case CellType_Cardiomyocyte:
 			fallthrough
-		case Myocyte:
+		case CellType_Myocyte:
 			fallthrough
-		case Neuron:
+		case CellType_Neuron:
 			fallthrough
 		default:
 			c.organ.materialPool.PutWaste(&WasteBlob{
@@ -813,7 +730,7 @@ func Transport(c CellActor) bool {
 		fmt.Printf("Unable to transport to %v: %v\n", edge.transportUrl, err)
 		return false
 	}
-	if c.CellType() == Bacteria {
+	if c.CellType() == CellType_Bacteria {
 		fmt.Println("Bacteria transported to", edge.transportUrl)
 	}
 	return true
@@ -885,7 +802,12 @@ func (e *EukaryoticCell) Start(ctx context.Context) {
 }
 
 func (e *EukaryoticCell) DoesWork() bool {
-	return e.cellType != Hemocytoblast
+	switch e.cellType {
+	case CellType_Hemocytoblast:
+		return false
+	default:
+		return true
+	}
 }
 
 func (e *EukaryoticCell) DoWork(ctx context.Context) {
@@ -935,20 +857,20 @@ func (e *EukaryoticCell) CleanUp() {
 
 func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 	switch e.cellType {
-	case Hemocytoblast:
+	case CellType_Hemocytoblast:
 		// Bootstrap the mitosis function to spawn leukocyte stem cells, but only in the present of the hormone.
 		hormone := e.organ.materialPool.GetHormone(ctx)
 		if hormone.granulocyte_csf >= HORMONE_CSF_THRESHOLD {
 			hormone.granulocyte_csf -= HORMONE_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Myeloblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, CellType_Myeloblast, WorkType_nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.macrophage_csf >= HORMONE_M_CSF_THRESHOLD {
 			hormone.macrophage_csf -= HORMONE_M_CSF_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Monocyte, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, CellType_Monocyte, WorkType_nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		if hormone.interleukin_3 >= HORMONE_IL3_THRESHOLD {
 			hormone.interleukin_3 -= HORMONE_IL3_THRESHOLD
-			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, Lymphoblast, nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
+			MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, CellType_Lymphoblast, WorkType_nothing, string(e.render.id), time.Now(), e.transportPath, e.wantPath, nil)
 		}
 		e.organ.materialPool.PutHormone(hormone)
 		fallthrough
@@ -966,11 +888,11 @@ func (e *EukaryoticCell) WillMitosis(ctx context.Context) bool {
 
 func (e *EukaryoticCell) IsAerobic() bool {
 	switch e.cellType {
-	case Pneumocyte:
+	case CellType_Pneumocyte:
 		fallthrough
-	case Podocyte:
+	case CellType_Podocyte:
 		fallthrough
-	case Keratinocyte:
+	case CellType_Keratinocyte:
 		return false
 	}
 	return true
@@ -1098,29 +1020,29 @@ func (i *Leukocyte) TimeToTransport() time.Duration {
 
 func (i *Leukocyte) CanTransport() bool {
 	switch i.cellType {
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		return true
-	case Myeloblast:
+	case CellType_Myeloblast:
 		return true
-	case Monocyte:
+	case CellType_Monocyte:
 		return true
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		return false
-	case Neutrocyte:
+	case CellType_Neutrocyte:
 		return true
-	case NaturalKillerCell:
+	case CellType_NaturalKillerCell:
 		return true
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		return true
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		return true
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		return true
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		return false
-	case EffectorBLymphocyte:
+	case CellType_EffectorBLymphocyte:
 		return false
-	case Dendritic:
+	case CellType_Dendritic:
 		return true
 	default:
 		return false
@@ -1132,7 +1054,7 @@ func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
 		return false
 	}
 	switch i.cellType {
-	case Dendritic:
+	case CellType_Dendritic:
 		// If the dendritic cell was activated, it should not transport,
 		// and opt to die instead: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3282617/
 		return len(i.mhc_ii.presented) == 0
@@ -1194,11 +1116,11 @@ func (i *Leukocyte) CanMove() bool {
 
 func (i *Leukocyte) CanInteract() bool {
 	switch i.cellType {
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		fallthrough
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		fallthrough
-	case EffectorBLymphocyte:
+	case CellType_EffectorBLymphocyte:
 		return false
 	default:
 		return true
@@ -1208,29 +1130,29 @@ func (i *Leukocyte) CanInteract() bool {
 func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 	// Overloading mitosis with differentiation. Once differentiated, the existing cell will disappear.
 	switch i.cellType {
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		fallthrough
-	case Myeloblast:
+	case CellType_Myeloblast:
 		fallthrough
-	case Monocyte:
+	case CellType_Monocyte:
 		// If there is no inflammation, don't differentiate.
 		ligand := i.organ.materialPool.GetLigand(ctx)
 		defer i.organ.materialPool.PutLigand(ligand)
 		if ligand.inflammation >= LIGAND_LEUKOCYTE_INFLAMMATION_THRESHOLD {
 			return true
 		}
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		return len(i.mhc_ii.presented) > 0
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		fallthrough
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		hormone := i.organ.materialPool.GetHormone(ctx)
 		defer i.organ.materialPool.PutHormone(hormone)
 		if hormone.interleukin_2 >= HORMONE_IL2_THRESHOLD {
 			hormone.interleukin_2 -= HORMONE_IL2_THRESHOLD
 			return true
 		}
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		return len(i.mhc_ii.presented) > 0
 	}
 	// All other leukocytes don't differentiate.
@@ -1240,48 +1162,48 @@ func (i *Leukocyte) WillMitosis(ctx context.Context) bool {
 func (i *Leukocyte) Mitosis(ctx context.Context) bool {
 	// https://en.wikipedia.org/wiki/Metamyelocyte#/media/File:Hematopoiesis_(human)_diagram_en.svg
 	switch i.cellType {
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		// Can differentiate into Natural Killer, B Cell, and T Cells.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, NaturalKillerCell, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_NaturalKillerCell, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
-	case Myeloblast:
+	case CellType_Myeloblast:
 		// Can differentiate into Neutrophil.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Neutrocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_Neutrocyte, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
-	case Monocyte:
+	case CellType_Monocyte:
 		// Can differentiate into Macrophage and Dendritic cells.
 		// There are specific conditions that detmermine whether to
 		// differentiate into a macrophage or dendritic cell. In this case, we
 		// flip a coin.
 		if rand.Intn(2) == 0 {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Macrophagocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_Macrophagocyte, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		} else {
-			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, Dendritic, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+			MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_Dendritic, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		}
 		// After differentiating, the existing cell will be converted to another, so clean up the existing one.
 		return false
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		// Split T Cell into Helper and Killer T Cells. Randomly decide if a Helper T cell should go to the battle field or to find a B cell.
 		helperWantPath := i.wantPath
 		if rand.Intn(2) == 0 {
 			helperWantPath = [10]string{}
 		}
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, HelperTLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, helperWantPath, i.mhc_ii.presented)
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, KillerTLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_HelperTLymphocyte, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, helperWantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_KillerTLymphocyte, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
 		i.mhc_ii.ClearPresented()
 		// Keep the original Virgin T Cell.
 		return true
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		fallthrough
-	case HelperTLymphocyte:
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
+	case CellType_HelperTLymphocyte:
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, i.cellType, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.proteins)
 		return true
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		// Split B cell into the original B cell and an Effector B cell.
-		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, EffectorBLymphocyte, nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
+		MakeTransportRequest(i.organ.transportUrl, i.dna.name, i.dna, CellType_EffectorBLymphocyte, WorkType_nothing, string(i.render.id), time.Now(), i.transportPath, i.wantPath, i.mhc_ii.presented)
 		// Deactivate after mitosis.
 		i.mhc_ii.ClearPresented()
 		// Keep the original B Cell.
@@ -1344,13 +1266,13 @@ func (i *Leukocyte) Execute(c CellActor) {
 
 func (i *Leukocyte) WantEdgeType() []EdgeType {
 	switch i.cellType {
-	case Dendritic:
+	case CellType_Dendritic:
 		if len(i.mhc_ii.presented) > 0 {
 			return []EdgeType{lymphatic}
 		}
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		return []EdgeType{lymphatic}
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		return []EdgeType{skeletal}
 	}
 	return nil
@@ -1735,9 +1657,9 @@ func (d *DendriticCell) Interact(ctx context.Context, c CellActor) {
 		return
 	}
 	switch c.CellType() {
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		d.MHC_II().SetProteins(c.MHC_II().GetProteins())
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		if t, ok := c.(*VirginTCell); ok {
 			t.ShouldActivate(d)
 		}
@@ -1880,12 +1802,12 @@ func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 		return
 	}
 	switch c.CellType() {
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		if m, ok := c.(*Macrophage); ok {
 			m.mhc_ii.SetPresented(t.mhc_ii.GetProteins())
 			m.activationTime = time.Now()
 		}
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		if b, ok := c.(*BCell); ok {
 			b.ShouldActivate(t)
 		}
@@ -2128,7 +2050,7 @@ type ProkaryoticCell struct {
 func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 	var generationTime time.Duration
 	switch base.cellType {
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		generationTime = GUT_BACTERIA_GENERATION_DURATION
 	default:
 		generationTime = DEFAULT_BACTERIA_GENERATION_DURATION
@@ -2184,7 +2106,7 @@ func (p *ProkaryoticCell) CanTransport() bool {
 func (p *ProkaryoticCell) TimeToTransport() time.Duration {
 	var transportDuration time.Duration
 	switch p.cellType {
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		transportDuration = GUT_BACTERIA_TRANSPORT_DURATION
 	default:
 		transportDuration = DEFAULT_BACTERIA_TRANSPORT_DURATION
@@ -2198,7 +2120,7 @@ func (p *ProkaryoticCell) ShouldTransport(ctx context.Context) bool {
 
 func (p *ProkaryoticCell) WantEdgeType() []EdgeType {
 	switch p.cellType {
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		return []EdgeType{gut_lining}
 	default:
 		return []EdgeType{muscular}
@@ -2226,7 +2148,7 @@ func (p *ProkaryoticCell) Mitosis(ctx context.Context) bool {
 	if p.organ == nil {
 		return false
 	}
-	MakeTransportRequest(p.organ.transportUrl, p.dna.name, p.dna, p.cellType, nothing, string(p.render.id), time.Now(), p.transportPath, p.wantPath, nil)
+	MakeTransportRequest(p.organ.transportUrl, p.dna.name, p.dna, p.cellType, WorkType_nothing, string(p.render.id), time.Now(), p.transportPath, p.wantPath, nil)
 	return true
 }
 
@@ -2243,7 +2165,7 @@ func (p *ProkaryoticCell) CanMove() bool {
 
 func (p *ProkaryoticCell) IsAerobic() bool {
 	switch p.cellType {
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		return true
 	}
 	return false
@@ -2275,7 +2197,7 @@ func CopyViralLoadCarrier(base *VirusCarrier) *VirusCarrier {
 }
 
 func (v *VirusCarrier) GetTargetCellType(dna *DNA) CellType {
-	cellType := CellType(int(dna.selfProteins[len(dna.selfProteins)-1]) % int(ViralLoadCarrier))
+	cellType := CellType(int(dna.selfProteins[len(dna.selfProteins)-1]) % int(CellType_ViralLoadCarrier))
 	return cellType
 }
 
@@ -2324,9 +2246,9 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 	}
 	switch cellType {
 	// Bacteria
-	case Bacteria:
+	case CellType_Bacteria:
 		fallthrough
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		cell = CopyProkaryoticCell(&ProkaryoticCell{
 			Cell: &Cell{
 				cellType:      cellType,
@@ -2339,7 +2261,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 			},
 		})
 	// Viral Load
-	case ViralLoadCarrier:
+	case CellType_ViralLoadCarrier:
 		return CopyViralLoadCarrier(&VirusCarrier{
 			Cell: &Cell{
 				cellType:      cellType,
@@ -2354,11 +2276,11 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 			virus: &Virus{},
 		})
 	// Leukocytes
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		fallthrough
-	case Myeloblast:
+	case CellType_Myeloblast:
 		fallthrough
-	case Monocyte:
+	case CellType_Monocyte:
 		cell = CopyLeukocyteStemCell(&LeukocyteStemCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2376,7 +2298,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		cell = CopyMacrophage(&Macrophage{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2394,7 +2316,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case Dendritic:
+	case CellType_Dendritic:
 		cell = CopyDendriticCell(&DendriticCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2412,7 +2334,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case Neutrocyte:
+	case CellType_Neutrocyte:
 		cell = CopyNeutrophil(&Neutrophil{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2430,7 +2352,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case NaturalKillerCell:
+	case CellType_NaturalKillerCell:
 		cell = CopyNaturalKiller(&NaturalKiller{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2448,7 +2370,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		cell = CopyVirginTCell(&VirginTCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2466,7 +2388,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		cell = CopyHelperTCell(&HelperTCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2484,7 +2406,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		cell = CopyKillerTCell(&KillerTCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2502,7 +2424,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		cell = CopyBCell(&BCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2520,7 +2442,7 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case EffectorBLymphocyte:
+	case CellType_EffectorBLymphocyte:
 		cell = CopyEffectorBCell(&EffectorBCell{
 			Leukocyte: &Leukocyte{
 				Cell: &Cell{
@@ -2538,23 +2460,23 @@ func MakeCellFromType(cellType CellType, workType WorkType, dna *DNA, render *Re
 				mhc_ii:        mhc_ii,
 			},
 		})
-	case RedBlood:
+	case CellType_RedBlood:
 		fallthrough
-	case Neuron:
+	case CellType_Neuron:
 		fallthrough
-	case Cardiomyocyte:
+	case CellType_Cardiomyocyte:
 		fallthrough
-	case Pneumocyte:
+	case CellType_Pneumocyte:
 		fallthrough
-	case Myocyte:
+	case CellType_Myocyte:
 		fallthrough
-	case Keratinocyte:
+	case CellType_Keratinocyte:
 		fallthrough
-	case Enterocyte:
+	case CellType_Enterocyte:
 		fallthrough
-	case Podocyte:
+	case CellType_Podocyte:
 		fallthrough
-	case Hemocytoblast:
+	case CellType_Hemocytoblast:
 		cell = CopyEukaryoticCell(&EukaryoticCell{
 			Cell: &Cell{
 				cellType:      cellType,

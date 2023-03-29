@@ -231,7 +231,7 @@ func Apoptosis(ctx context.Context, cell CellActor) bool {
 func Respirate(ctx context.Context, cell CellActor) bool {
 	// Receive a unit of 02 for a unit of CO2
 	request := cell.Organ().RequestWork(ctx, Work{
-		workType: exchange,
+		workType: WorkType_exchange,
 	})
 	if request.status == 200 {
 		cell.Organ().materialPool.PutResource(&ResourceBlob{
@@ -252,7 +252,7 @@ func Respirate(ctx context.Context, cell CellActor) bool {
 func Expirate(ctx context.Context, cell CellActor) bool {
 	// Exchange a unit of C02 for a unit of O2
 	request := cell.Organ().RequestWork(ctx, Work{
-		workType: exhale,
+		workType: WorkType_exhale,
 	})
 	if request.status == 200 {
 		waste := cell.Organ().materialPool.GetWaste(ctx)
@@ -272,7 +272,7 @@ func Expirate(ctx context.Context, cell CellActor) bool {
 func Filtrate(ctx context.Context, cell CellActor) bool {
 	// Remove some amount of creatinine.
 	request := cell.Organ().RequestWork(ctx, Work{
-		workType: filter,
+		workType: WorkType_filter,
 	})
 	if request.status == 200 {
 		waste := cell.Organ().materialPool.GetWaste(ctx)
@@ -288,12 +288,12 @@ func Filtrate(ctx context.Context, cell CellActor) bool {
 
 func MuscleFindFood(ctx context.Context, cell CellActor) bool {
 	request := cell.Organ().RequestWork(ctx, Work{
-		workType: think,
+		workType: WorkType_think,
 	})
 	if request.status == 200 {
 		// Successfully found a food unit.
 		cell.Organ().RequestWork(ctx, Work{
-			workType: digest,
+			workType: WorkType_digest,
 		})
 	}
 	return true
@@ -301,14 +301,14 @@ func MuscleFindFood(ctx context.Context, cell CellActor) bool {
 
 func MuscleSeekSkinProtection(ctx context.Context, cell CellActor) bool {
 	cell.Organ().RequestWork(ctx, Work{
-		workType: cover,
+		workType: WorkType_cover,
 	})
 	return true
 }
 
 func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	cell.Organ().RequestWork(ctx, Work{
-		workType: move,
+		workType: WorkType_move,
 	})
 
 	// Check resources in the brain. If not enough, stimulate muscle movements.
@@ -325,7 +325,7 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 	}
 	for ligand.hunger > LIGAND_HUNGER_THRESHOLD {
 		cell.Organ().RequestWork(ctx, Work{
-			workType: move,
+			workType: WorkType_move,
 		})
 		ligand.hunger--
 	}
@@ -334,7 +334,7 @@ func BrainStimulateMuscles(ctx context.Context, cell CellActor) bool {
 
 func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 	cell.Organ().RequestWork(ctx, Work{
-		workType: pump,
+		workType: WorkType_pump,
 	})
 	// Check o2 and co2 in the brain. If not enough/too much, stimulate the heart.
 	organ := cell.Organ()
@@ -355,7 +355,7 @@ func BrainRequestPump(ctx context.Context, cell CellActor) bool {
 	}
 	for ligand.asphyxia > LIGAND_ASPHYXIA_THRESHOLD {
 		cell.Organ().RequestWork(ctx, Work{
-			workType: pump,
+			workType: WorkType_pump,
 		})
 		ligand.asphyxia--
 	}
@@ -420,39 +420,39 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	}
 	currNode := s.root
 	switch c.CellType() {
-	case Pneumocyte:
+	case CellType_Pneumocyte:
 		fallthrough
-	case Keratinocyte:
+	case CellType_Keratinocyte:
 		fallthrough
-	case Podocyte:
+	case CellType_Podocyte:
 		fallthrough
-	case Hemocytoblast:
+	case CellType_Hemocytoblast:
 		fallthrough
-	case Lymphoblast:
+	case CellType_Lymphoblast:
 		fallthrough
-	case Myeloblast:
+	case CellType_Myeloblast:
 		fallthrough
-	case Monocyte:
+	case CellType_Monocyte:
 		fallthrough
-	case Macrophagocyte:
+	case CellType_Macrophagocyte:
 		fallthrough
-	case Neutrocyte:
+	case CellType_Neutrocyte:
 		fallthrough
-	case NaturalKillerCell:
+	case CellType_NaturalKillerCell:
 		fallthrough
-	case VirginTLymphocyte:
+	case CellType_VirginTLymphocyte:
 		fallthrough
-	case HelperTLymphocyte:
+	case CellType_HelperTLymphocyte:
 		fallthrough
-	case KillerTLymphocyte:
+	case CellType_KillerTLymphocyte:
 		fallthrough
-	case BLymphocyte:
+	case CellType_BLymphocyte:
 		fallthrough
-	case EffectorBLymphocyte:
+	case CellType_EffectorBLymphocyte:
 		fallthrough
-	case Dendritic:
+	case CellType_Dendritic:
 		// Do nothing special.
-	case RedBlood:
+	case CellType_RedBlood:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Expirate,
@@ -467,7 +467,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
-	case Neuron:
+	case CellType_Neuron:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   BrainRequestPump,
@@ -496,7 +496,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
-	case Enterocyte:
+	case CellType_Enterocyte:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   Flatulate,
@@ -520,7 +520,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 			},
 		}
 		currNode = currNode.next
-	case Myocyte:
+	case CellType_Myocyte:
 		currNode.next = &StateNode{
 			function: &ProteinFunction{
 				action:   MuscleFindFood,
@@ -536,7 +536,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 		}
 		currNode = currNode.next
 		fallthrough
-	case Cardiomyocyte:
+	case CellType_Cardiomyocyte:
 		fallthrough
 	default:
 		currNode.next = &StateNode{
@@ -549,9 +549,9 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 	}
 	if c.CanMove() {
 		switch c.CellType() {
-		case VirginTLymphocyte:
+		case CellType_VirginTLymphocyte:
 			fallthrough
-		case BLymphocyte:
+		case CellType_BLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsChemotaxisCytokineOrExplore,
@@ -559,13 +559,13 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 				},
 			}
 			currNode = currNode.next
-		case Neutrocyte:
+		case CellType_Neutrocyte:
 			fallthrough
-		case Macrophagocyte:
+		case CellType_Macrophagocyte:
 			fallthrough
-		case Dendritic:
+		case CellType_Dendritic:
 			fallthrough
-		case HelperTLymphocyte:
+		case CellType_HelperTLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsAntigenPresentCytokineOrExplore,
@@ -573,9 +573,9 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 				},
 			}
 			currNode = currNode.next
-		case NaturalKillerCell:
+		case CellType_NaturalKillerCell:
 			fallthrough
-		case KillerTLymphocyte:
+		case CellType_KillerTLymphocyte:
 			currNode.next = &StateNode{
 				function: &ProteinFunction{
 					action:   MoveTowardsCellStressCytokineOrExplore,
@@ -583,13 +583,13 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 				},
 			}
 			currNode = currNode.next
-		case Lymphoblast:
+		case CellType_Lymphoblast:
 			fallthrough
-		case Myeloblast:
+		case CellType_Myeloblast:
 			fallthrough
-		case Monocyte:
+		case CellType_Monocyte:
 			fallthrough
-		case EffectorBLymphocyte:
+		case CellType_EffectorBLymphocyte:
 			fallthrough
 		default:
 			currNode.next = &StateNode{
@@ -658,7 +658,7 @@ func BacteriaWillMitosis(ctx context.Context, cell CellActor) bool {
 	resource := cell.Organ().materialPool.GetResource(ctx)
 	defer cell.Organ().materialPool.PutResource(resource)
 	switch cell.CellType() {
-	case Bacteroidota:
+	case CellType_Bacteroidota:
 		// Grow via HUNGER ligand.
 		ligand := cell.Organ().materialPool.GetLigand(ctx)
 		defer cell.Organ().materialPool.PutLigand(ligand)

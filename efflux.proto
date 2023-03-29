@@ -1,0 +1,128 @@
+syntax = "proto3";
+package efflux;
+
+option go_package = "./main";
+
+enum CellType {
+    Bacteria = 0;               // A baseline prokaryotic cell.
+    Bacteroidota = 1;           // Bacteria that synthesize vitamins in the gut.
+    RedBlood = 2;       
+    Neuron = 3;     
+    Cardiomyocyte = 4;          // Heart Cell
+    Pneumocyte = 5;             // Pulmonary Cell
+    Myocyte = 6;                // Muscle Cell
+    Keratinocyte = 7;           // Skin Cell
+    Enterocyte = 8;             // Gut Lining Cell
+    Podocyte = 9;               // Kidney Cell
+    Hemocytoblast = 10;         // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
+    Lymphoblast = 11;           // Stem Cell, becomes NK, B cells, T cells
+    Myeloblast = 12;            // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but n
+    Monocyte = 13;              // Stem Cell, becomes Macrophages and Dendritic cells
+    Macrophagocyte = 14;        // Macrophage
+    Dendritic = 15;             // Dendritic Cells
+    Neutrocyte = 16;            // Neutrophils
+    NaturalKillerCell = 17;     // Natural Killer Cell
+    VirginTLymphocyte = 18;     // Virgin T Cell
+    HelperTLymphocyte = 19;     // Helper T Cell
+    KillerTLymphocyte = 20;     // Killer T Cell
+    BLymphocyte = 21;           // B Cell
+    EffectorBLymphocyte = 22;   // Plasma Cell
+    ViralLoadCarrier = 23;      // A dummy cell that carries a virus. Always make sure this is last.
+}
+
+enum WorkType {
+    nothing = 0;
+	diffusion = 1;
+	cover = 2;     // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
+	exchange = 3;  // Called on blood cells by other cells.
+	exhale = 4;    // Called on lung cells by blood cells.
+	pump = 5;      // Called on to heart cells to pump, by brain cels.
+	move = 6;      // Called on muscle cells by brain cells.
+	think = 7;     // Called on brain cells to perform a computation, by muscle cells.
+	digest = 8;    // Called on gut cells, by muscle cells.
+	filter = 9;    // Called on kidney cells, by blood cells.
+}
+
+message WorkSocketData {
+	int32 work_type = 1;
+	string result = 2;
+	int32 status = 3;
+    DiffusionSocketData diffusion = 4;
+}
+message ResourceBlobSocketData {
+    int32 o2 = 1;
+    int32 glucose = 2;
+    int32 vitamins = 3;
+}
+
+message WasteBlobSocketData {
+    int32 c_o2 = 1;
+    int32 creatinine = 2;
+}
+
+message HormoneBlobSocketData {
+    int32 granulocyte_colony_stimulating_factor = 1;
+    int32 macrophage_colony_stimulating_factor = 2;
+    int32 interleukin3 = 3;
+    int32 interleukin2 = 4;
+}
+
+message AntigenBlobSocketData {
+    repeated int32 antibody_proteins = 1;
+    repeated int64 antibody_concentrations = 2;
+}
+
+message DiffusionSocketData {
+	ResourceBlobSocketData resources = 1;
+	WasteBlobSocketData waste = 2;
+	HormoneBlobSocketData hormone = 3;
+	AntigenBlobSocketData antigen = 4;
+}
+
+message WorkStatusSocketData {
+    string work_type = 1;              
+    int32 request_count = 2;             
+    int32 success_count = 3;             
+    int32 failure_count = 4;             
+    int32 completed_count = 5;           
+    int32 completed_failure_count = 6;    
+}
+
+message MaterialStatusSocketData {
+    int32 o2 = 1;
+    int32 glucose = 2;
+    int32 vitamin = 3;
+    int32 co2 = 4;
+    int32 creatinine = 5;
+    int32 growth = 6;
+    int32 hunger = 7;
+    int32 asphyxia = 8;
+    int32 inflammation = 9;
+    int32 g_csf = 10;
+    int32 m_csf = 11;
+    int32 il_3 = 12;
+    int32 il_2 = 13;
+    int32 viral_load = 14;
+    int32 antibody_load = 15;
+}
+
+message StatusSocketData {
+	int32 status = 1;
+	string name = 2;
+	repeated string connections = 3;
+	repeated WorkStatusSocketData work_status = 4;
+	MaterialStatusSocketData material_status = 5;
+
+}
+
+message RenderableSocketData {
+    string id = 1;
+	bool visible = 3;
+	Position position = 4;
+}
+
+message Position  {
+    int32 x = 1;
+    int32 y = 2;
+    int32 z = 3;
+} 

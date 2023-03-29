@@ -14,46 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
-
-type WorkType int
-
-const (
-	nothing WorkType = iota
-	diffusion
-	cover    // Called on skin cells by muscle cells. Will randomly fail, i.e. cuts.
-	exchange // Called on blood cells by other cells.
-	exhale   // Called on lung cells by blood cells.
-	pump     // Called on to heart cells to pump, by brain cels.
-	move     // Called on muscle cells by brain cells.
-	think    // Called on brain cells to perform a computation, by muscle cells.
-	digest   // Called on gut cells, by muscle cells.
-	filter   // Called on kidney cellzs, by blood cells.
-)
-
-func (w WorkType) String() string {
-	switch w {
-	case cover:
-		return "cover"
-	case diffusion:
-		return "diffusion"
-	case digest:
-		return "digest"
-	case exhale:
-		return "exhale"
-	case filter:
-		return "filter"
-	case exchange:
-		return "exchange"
-	case pump:
-		return "pump"
-	case move:
-		return "move"
-	case think:
-		return "think"
-	}
-	return "unknown"
-}
 
 type Worker interface {
 	WorkType() WorkType
@@ -66,54 +28,6 @@ type Work struct {
 	workType WorkType
 	result   string
 	status   int
-}
-
-type WorkSocketData struct {
-	WorkType int
-	Result   string
-	Status   int
-}
-
-type DiffusionSocketData struct {
-	Resources ResourceBlobData
-	Waste     WasteBlobData
-	Hormone   HormoneBlobData
-	Antigen   AntigenBlobData
-}
-
-type StatusSocketData struct {
-	Status         int                `json:"status"`
-	Name           string             `json:"name"`
-	Connections    []string           `json:"connections"`
-	WorkStatus     []WorkStatusData   `json:"workStatus"`
-	MaterialStatus MaterialStatusData `json:"materialStatus"`
-}
-
-type WorkStatusData struct {
-	WorkType              string `json:"workType"`
-	RequestCount          int    `json:"requestCount"`
-	SuccessCount          int    `json:"successCount"`
-	FailureCount          int    `json:"failureCount"`
-	CompletedCount        int    `json:"completedCount"`
-	CompletedFailureCount int    `json:"completedFailureCount"`
-}
-
-type MaterialStatusData struct {
-	O2            int `json:"o2"`
-	Glucose       int `json:"glucose"`
-	Vitamin       int `json:"vitamin"`
-	Co2           int `json:"co2"`
-	Creatinine    int `json:"creatinine"`
-	Growth        int `json:"growth"`
-	Hunger        int `json:"hunger"`
-	Asphyxia      int `json:"asphyxia"`
-	Inflammation  int `json:"inflammation"`
-	G_CSF         int `json:"g_csf"`
-	M_CSF         int `json:"m_csf"`
-	IL_3          int `json:"il_3"`
-	IL_2          int `json:"il_2"`
-	Viral_Load    int `json:"viral_load"`
-	Antibody_Load int `json:"antibody_load"`
 }
 
 type TransportRequest struct {
@@ -222,7 +136,7 @@ func (n *Node) HandleTransportRequest(ctx context.Context, w http.ResponseWriter
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if cell.CellType() == ViralLoadCarrier {
+	if cell.CellType() == CellType_ViralLoadCarrier {
 		virusCarrier := cell.(*VirusCarrier)
 		n.antigenPool.DepositViralLoad(&ViralLoad{
 			virus:         virusCarrier.virus,
@@ -266,30 +180,49 @@ func (n *Node) MakeCellFromRequest(request TransportRequest) (CellActor, error) 
 	return MakeCellFromType(request.CellType, request.WorkType, dna, render, request.SpawnTime, request.TransportPath, request.WantPath, request.MHC_II_Proteins), nil
 }
 
-func SendWork(connection *Connection, request Work) {
-	err := connection.WriteJSON(WorkSocketData{
-		WorkType: int(request.workType),
-		Result:   request.result,
-		Status:   request.status,
-	})
+func SendWork(connection *Connection, request Work, diffusion *DiffusionSocketData) {
+	work := &WorkSocketData{
+		WorkType:  int32(request.workType),
+		Result:    request.result,
+		Status:    int32(request.status),
+		Diffusion: diffusion,
+	}
+	out, err := proto.Marshal(work)
+	if err != nil {
+		log.Fatalln("Failed to encode work:", err)
+	}
+	err = connection.WriteMessage(websocket.BinaryMessage, out)
 	if err != nil {
 		log.Fatal("Send: ", err)
 	}
 }
 
-func SendStatus(connection *Connection, status StatusSocketData) error {
-	return connection.WriteJSON(status)
+func SendStatus(connection *Connection, status *StatusSocketData) error {
+	out, err := proto.Marshal(status)
+	if err != nil {
+		return err
+	}
+	err = connection.WriteMessage(websocket.BinaryMessage, out)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func ReceiveWork(connection *Connection) (request Work) {
-	data := &WorkSocketData{}
-	err := connection.ReadJSON(data)
+func ReceiveWork(connection *Connection) (request Work, diffusion *DiffusionSocketData) {
+	_, message, err := connection.ReadMessage()
 	if err != nil {
 		log.Fatalln("Receive: ", err)
 	}
-	request.workType = WorkType(data.WorkType)
-	request.status = data.Status
-	request.result = data.Result
+	work := &WorkSocketData{}
+	err = proto.Unmarshal(message, work)
+	if err != nil {
+		log.Fatalln("Failed to parse work: ", err)
+	}
+	request.workType = WorkType(work.WorkType)
+	request.status = int(work.Status)
+	request.result = work.Result
+	diffusion = work.Diffusion
 	return
 }
 
@@ -361,16 +294,16 @@ type Connection struct {
 	*websocket.Conn
 }
 
-func (c *Connection) WriteJSON(v interface{}) error {
+func (c *Connection) WriteMessage(messageType int, data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return c.Conn.WriteJSON(v)
+	return c.Conn.WriteMessage(messageType, data)
 }
 
-func (c *Connection) ReadJSON(v interface{}) error {
+func (c *Connection) ReadMessage() (messageType int, p []byte, err error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
-	return c.Conn.ReadJSON(v)
+	return c.Conn.ReadMessage()
 }
 
 func (c *Connection) Close() error {
@@ -407,7 +340,8 @@ func (n *Node) Start(ctx context.Context) {
 		n.HandleTransportRequest(ctx, w, r)
 	})
 	if n.tissue != nil {
-		n.serverMux.HandleFunc(WORLD_ENDPOINT, WebsocketHandler(ctx, n.tissue.Stream))
+		n.serverMux.HandleFunc(WORLD_RENDER_ENDPOINT, WebsocketHandler(ctx, n.tissue.Stream))
+		n.serverMux.HandleFunc(WORLD_TEXTURE_ENDPOINT, n.tissue.RenderRootMatrix)
 	}
 
 	go func() {
@@ -504,9 +438,9 @@ func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Conn
 			log.Fatalln("Node cannot process incoming work")
 			return
 		default:
-			work := ReceiveWork(connection)
-			if n.materialPool != nil && work.workType == diffusion {
-				n.ReceiveDiffusion(work)
+			work, diffusion := ReceiveWork(connection)
+			if n.materialPool != nil && work.workType == WorkType_diffusion {
+				n.ReceiveDiffusion(diffusion)
 				continue
 			}
 			m, ok := n.managers.Load(work.workType)
@@ -522,7 +456,7 @@ func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Conn
 					select {
 					case w := <-manager.nextAvailableWorker:
 						finishedWork := w.Work(ctx, work)
-						SendWork(connection, finishedWork)
+						SendWork(connection, finishedWork, nil)
 						manager.Lock()
 						manager.completedCount++
 						if finishedWork.status != 200 {
@@ -546,24 +480,21 @@ func (n *Node) ProcessIncomingWorkRequests(ctx context.Context, connection *Conn
 	}
 }
 
-func (n *Node) ReceiveDiffusion(request Work) {
-	data := &DiffusionSocketData{}
-	json.Unmarshal([]byte(request.result), data)
-
+func (n *Node) ReceiveDiffusion(data *DiffusionSocketData) {
 	n.materialPool.PutResource(&ResourceBlob{
-		o2:       data.Resources.O2,
-		glucose:  data.Resources.Glucose,
-		vitamins: data.Resources.Vitamins,
+		o2:       int(data.Resources.O2),
+		glucose:  int(data.Resources.Glucose),
+		vitamins: int(data.Resources.Vitamins),
 	})
 	n.materialPool.PutWaste(&WasteBlob{
-		co2:        data.Waste.CO2,
-		creatinine: data.Waste.Creatinine,
+		co2:        int(data.Waste.CO2),
+		creatinine: int(data.Waste.Creatinine),
 	})
 	n.materialPool.PutHormone(&HormoneBlob{
-		granulocyte_csf: data.Hormone.GranulocyteColonyStimulatingFactor,
-		macrophage_csf:  data.Hormone.MacrophageColonyStimulatingFactor,
-		interleukin_3:   data.Hormone.Interleukin3,
-		interleukin_2:   data.Hormone.Interleukin2,
+		granulocyte_csf: int(data.Hormone.GranulocyteColonyStimulatingFactor),
+		macrophage_csf:  int(data.Hormone.MacrophageColonyStimulatingFactor),
+		interleukin_3:   int(data.Hormone.Interleukin3),
+		interleukin_2:   int(data.Hormone.Interleukin2),
 	})
 	n.antigenPool.PutDiffusionLoad(data.Antigen)
 }
@@ -581,18 +512,18 @@ func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 				address := strings.Replace(edge.workConnection.RemoteAddr().String(), "/work", "", 1)
 				connections = append(connections, address)
 			}
-			var workStatus []WorkStatusData
+			var workStatus []*WorkStatusSocketData
 			n.managers.Range(func(w, m any) bool {
 				workType := w.(WorkType)
 				manager := m.(*WorkManager)
 				manager.Lock()
-				workStatus = append(workStatus, WorkStatusData{
+				workStatus = append(workStatus, &WorkStatusSocketData{
 					WorkType:              workType.String(),
-					RequestCount:          manager.requestCount,
-					SuccessCount:          manager.successCount,
-					FailureCount:          manager.failureCount,
-					CompletedCount:        manager.completedCount,
-					CompletedFailureCount: manager.completedFailureCount,
+					RequestCount:          int32(manager.requestCount),
+					SuccessCount:          int32(manager.successCount),
+					FailureCount:          int32(manager.failureCount),
+					CompletedCount:        int32(manager.completedCount),
+					CompletedFailureCount: int32(manager.completedFailureCount),
 				})
 				manager.requestCount = 0
 				manager.successCount = 0
@@ -602,24 +533,24 @@ func (n *Node) GetNodeStatus(ctx context.Context, connection *Connection) {
 				manager.Unlock()
 				return true
 			})
-			materialStatus := MaterialStatusData{
-				O2:            n.materialPool.resourcePool.resources.o2,
-				Glucose:       n.materialPool.resourcePool.resources.glucose,
-				Vitamin:       n.materialPool.resourcePool.resources.vitamins,
-				Co2:           n.materialPool.wastePool.wastes.co2,
-				Creatinine:    n.materialPool.wastePool.wastes.creatinine,
-				Growth:        n.materialPool.ligandPool.ligands.growth,
-				Hunger:        n.materialPool.ligandPool.ligands.hunger,
-				Asphyxia:      n.materialPool.ligandPool.ligands.asphyxia,
-				Inflammation:  n.materialPool.ligandPool.ligands.inflammation,
-				G_CSF:         n.materialPool.hormonePool.hormones.granulocyte_csf,
-				M_CSF:         n.materialPool.hormonePool.hormones.macrophage_csf,
-				IL_3:          n.materialPool.hormonePool.hormones.interleukin_3,
-				IL_2:          n.materialPool.hormonePool.hormones.interleukin_2,
-				Viral_Load:    n.antigenPool.GetViralLoad(),
-				Antibody_Load: n.antigenPool.GetAntibodyLoad(),
+			materialStatus := &MaterialStatusSocketData{
+				O2:           int32(n.materialPool.resourcePool.resources.o2),
+				Glucose:      int32(n.materialPool.resourcePool.resources.glucose),
+				Vitamin:      int32(n.materialPool.resourcePool.resources.vitamins),
+				Co2:          int32(n.materialPool.wastePool.wastes.co2),
+				Creatinine:   int32(n.materialPool.wastePool.wastes.creatinine),
+				Growth:       int32(n.materialPool.ligandPool.ligands.growth),
+				Hunger:       int32(n.materialPool.ligandPool.ligands.hunger),
+				Asphyxia:     int32(n.materialPool.ligandPool.ligands.asphyxia),
+				Inflammation: int32(n.materialPool.ligandPool.ligands.inflammation),
+				GCsf:         int32(n.materialPool.hormonePool.hormones.granulocyte_csf),
+				MCsf:         int32(n.materialPool.hormonePool.hormones.macrophage_csf),
+				Il_3:         int32(n.materialPool.hormonePool.hormones.interleukin_3),
+				Il_2:         int32(n.materialPool.hormonePool.hormones.interleukin_2),
+				ViralLoad:    int32(n.antigenPool.GetViralLoad()),
+				AntibodyLoad: int32(n.antigenPool.GetAntibodyLoad()),
 			}
-			err := SendStatus(connection, StatusSocketData{
+			err := SendStatus(connection, &StatusSocketData{
 				Status:         200,
 				Name:           n.name,
 				Connections:    connections,
@@ -659,7 +590,7 @@ func (n *Node) RequestWork(ctx context.Context, request Work) (result Work) {
 		}
 	default:
 		for _, edge := range n.edges {
-			SendWork(edge.workConnection, request)
+			SendWork(edge.workConnection, request, nil)
 		}
 	}
 	if result.status == 0 {
@@ -711,38 +642,34 @@ func (n *Node) SendDiffusion(ctx context.Context) {
 		resource := n.materialPool.SplitResource(ctx)
 		waste := n.materialPool.SplitWaste(ctx)
 		hormone := n.materialPool.SplitHormone(ctx)
-		diffusionData, err := json.Marshal(DiffusionSocketData{
-			Resources: ResourceBlobData{
-				O2:       resource.o2,
-				Glucose:  resource.glucose,
-				Vitamins: resource.vitamins,
+		diffusionData := &DiffusionSocketData{
+			Resources: &ResourceBlobSocketData{
+				O2:       int32(resource.o2),
+				Glucose:  int32(resource.glucose),
+				Vitamins: int32(resource.vitamins),
 			},
-			Waste: WasteBlobData{
-				CO2:        waste.co2,
-				Creatinine: waste.creatinine,
+			Waste: &WasteBlobSocketData{
+				CO2:        int32(waste.co2),
+				Creatinine: int32(waste.creatinine),
 			},
-			Hormone: HormoneBlobData{
-				GranulocyteColonyStimulatingFactor: hormone.granulocyte_csf,
-				MacrophageColonyStimulatingFactor:  hormone.macrophage_csf,
-				Interleukin3:                       hormone.interleukin_3,
-				Interleukin2:                       hormone.interleukin_2,
+			Hormone: &HormoneBlobSocketData{
+				GranulocyteColonyStimulatingFactor: int32(hormone.granulocyte_csf),
+				MacrophageColonyStimulatingFactor:  int32(hormone.macrophage_csf),
+				Interleukin3:                       int32(hormone.interleukin_3),
+				Interleukin2:                       int32(hormone.interleukin_2),
 			},
 			Antigen: n.antigenPool.GetDiffusionLoad(),
-		})
-		if err != nil {
-			log.Fatalln("Could not send diffusion data: ", err)
 		}
 		SendWork(edge.workConnection, Work{
-			workType: diffusion,
-			result:   string(diffusionData),
+			workType: WorkType_diffusion,
 			status:   0,
-		})
+		}, diffusionData)
 
 		// If there are viral loads that are greater than max, deposit it.
 		for _, viralLoad := range n.antigenPool.GetExcessViralLoad() {
 			virusDNA := viralLoad.virus.dna
 			fmt.Println("Viral load diffused to", edge.transportUrl)
-			MakeTransportRequest(edge.transportUrl, virusDNA.name, virusDNA, ViralLoadCarrier, nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
+			MakeTransportRequest(edge.transportUrl, virusDNA.name, virusDNA, CellType_ViralLoadCarrier, WorkType_nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 		}
 	}
 }
@@ -754,7 +681,7 @@ func (n *Node) ProcessIncomingWorkResponses(ctx context.Context, connection *Con
 			log.Fatalln("Node cannot process work responses")
 			return
 		default:
-			work := ReceiveWork(connection)
+			work, _ := ReceiveWork(connection)
 			if n.verbose {
 				fmt.Printf("%v Received Response: %v\n", n, work)
 			}

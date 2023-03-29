@@ -1,0 +1,7 @@
+all: gen run
+
+gen:
+	grpc_tools_node_protoc -I=./ --go_out=. --go_opt=paths=source_relative --js_out=public/ efflux.proto
+
+run:
+	go run . &. log.txt
