@@ -57,7 +57,7 @@ const layout = {
 class Node {
     constructor(address) {
         if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
-            address = `ws://${address}`;
+            address = `ws://${address.replace('https://', '').replace('http://', '')}`;
         }
         this.address = address;
         this.id = address.replace( /\D/g, '');
@@ -74,6 +74,7 @@ class Node {
 
     async setupStatusConnection(address) {
         const socket = new WebSocket(address + '/status')
+        socket.binaryType = "arraybuffer";
         try {
             this.processStatusSocket(await new Promise((resolve, reject) => {
                 socket.onopen = () => {
@@ -100,8 +101,7 @@ class Node {
 
     async getStatus({data}) {
         try {
-            let arrayBuffer = await data.arrayBuffer();
-            data = proto.efflux.StatusSocketData.deserializeBinary(arrayBuffer).toObject();
+            data = proto.efflux.StatusSocketData.deserializeBinary(data).toObject();
         } catch (e) {
             // console.error(e);
             data = null;
@@ -257,11 +257,13 @@ class Render {
     constructor(node) {
         this.node = node;
         this.activeSocket = null;
+        this.renderableDataBuffer = [];
     }
 
     async setupRender(address) {
         this.setupRenderTexture(address);
         const socket = new WebSocket(address + '/render/stream')
+        socket.binaryType = "arraybuffer";
         try {
             await new Promise((resolve, reject) => {
                 socket.onopen = () => {
@@ -272,7 +274,7 @@ class Render {
             console.log('Connected Render:', this.node.address);
             this.activeSocket = socket;
             socket.onmessage = (event) => {
-                this.getRender(event);
+                this.getRenderData(event);
             }
             const closePromise = new Promise((resolve) => {
                 socket.onclose = () => {
@@ -282,6 +284,7 @@ class Render {
                 };
             });
             PendingCloseSockets.set(socket, closePromise);
+            window.requestAnimationFrame(() => this.render());
         } catch (err) {
             console.error('Connection refused:', address, err);
             socket.close();
@@ -360,26 +363,15 @@ class Render {
         return PendingCloseSockets.get(toClose);
     }
 
-    async getRender({data}) {
-        if (!data instanceof Blob) {
-            return;
-        }
-        let isRenderableData = false;
-        let renderData;
-        try {
-            let arrayBuffer = await data.arrayBuffer();
-            renderData = proto.efflux.RenderableSocketData.deserializeBinary(arrayBuffer).toObject();
-            isRenderableData = !!renderData.id;
-        } catch (e) {
-            // console.error("Render Error:", e);
-            return;
-        }
-        if (isRenderableData) {
+    render() {
+        const renderables = this.renderableDataBuffer;
+        this.renderableDataBuffer = [];
+        for (let i = renderables.length -1; i >= 0; i--) {
             const {
                 id,
                 visible,
                 position,
-            } = renderData;
+            } = renderables[i];
             const {x, y, z} = position;
             // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
             let el = document.querySelector(`#${id}`);
@@ -392,7 +384,7 @@ class Render {
                         class="cell disposable"
                         radius="${getSize(id)}"
                         color="${color}"
-                        position="${x} ${-y} 0">
+                        position="${x} ${-y} ${z}">
                     </a-sphere>
                 `, container);
                 el = container.firstElementChild;
@@ -405,9 +397,31 @@ class Render {
             }
             if (el.object3D) {
                 el.object3D.visible = visible;
-                el.object3D.position.set(x, -y, z)
+                const steps = 15;
+                for (let i = 0; i < steps; i++) {
+                    el.object3D.position.copy(
+                        el.object3D.position.lerp(new THREE.Vector3(x, -y, z), i/steps)
+                    )
+                }
             }
             LastRenderTime.set(id, Date.now());
+        }
+        if (this.activeSocket) {
+            window.requestAnimationFrame(() => this.render());
+        }
+    }
+
+    async getRenderData({data}) {
+        if (!data instanceof Blob) {
+            return;
+        }
+        try {
+            const renderData = proto.efflux.RenderableSocketData.deserializeBinary(data).toObject();
+            if (renderData.id) {
+                this.renderableDataBuffer.push(renderData);
+            }
+        } catch (e) {
+            // console.error("Render Error:", e);
             return;
         }
     }
