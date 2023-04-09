@@ -1354,6 +1354,18 @@ func (n *Neutrophil) Start(ctx context.Context) {
 	n.Tissue().Attach(n.render)
 }
 
+func (n *Neutrophil) DoesWork() bool {
+	return true
+}
+
+func (n *Neutrophil) DoWork(ctx context.Context) {
+	// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8589350
+	_, _, foundOther := n.SampleProteins(ctx, true)
+	if foundOther && n.FoundAntigenCytokine() {
+		n.IncreaseInflammation()
+	}
+}
+
 func (n *Neutrophil) BroadcastExistence(ctx context.Context) {
 	BroadcastExistence(ctx, n)
 }
