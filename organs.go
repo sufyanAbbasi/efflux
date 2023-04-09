@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"container/ring"
 	"context"
 	"encoding/json"
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 )
@@ -239,18 +242,19 @@ type WorkManager struct {
 
 type Node struct {
 	sync.RWMutex
-	name         string
-	edges        []*Edge
-	serverMux    *http.ServeMux
-	origin       string
-	port         string
-	websocketUrl string
-	transportUrl string
-	managers     *sync.Map
-	materialPool *MaterialPool
-	antigenPool  *AntigenPool
-	tissue       *Tissue
-	verbose      bool
+	name           string
+	edges          []*Edge
+	serverMux      *http.ServeMux
+	origin         string
+	port           string
+	websocketUrl   string
+	transportUrl   string
+	managers       *sync.Map
+	nanobotManager *NanobotManager
+	materialPool   *MaterialPool
+	antigenPool    *AntigenPool
+	tissue         *Tissue
+	verbose        bool
 }
 
 var currentPort = 7999
@@ -278,9 +282,11 @@ func InitializeNewNode(ctx context.Context, graph *Graph, name string, verbose b
 	}
 	node.materialPool = InitializeMaterialPool(ctx)
 	node.antigenPool = InitializeAntigenPool(ctx)
+	node.nanobotManager = InitializeNanobotManager(ctx)
 	graph.allNodes[url] = node
 	node.Start(ctx)
 	go node.tissue.Start(ctx)
+	go node.nanobotManager.Start(ctx)
 	return node
 }
 
@@ -339,6 +345,10 @@ func (n *Node) Start(ctx context.Context) {
 	n.serverMux.HandleFunc(TRANSPORT_ENDPOINT, func(w http.ResponseWriter, r *http.Request) {
 		n.HandleTransportRequest(ctx, w, r)
 	})
+	n.serverMux.HandleFunc(INTERACTIONS_LOGIN_ENDPOINT, func(w http.ResponseWriter, r *http.Request) {
+		n.InteractionsLogin(ctx, w, r)
+	})
+	n.serverMux.HandleFunc(INTERACTIONS_STREAM_ENDPOINT, WebsocketHandler(ctx, n.InteractionStream))
 	if n.tissue != nil {
 		n.serverMux.HandleFunc(WORLD_RENDER_ENDPOINT, WebsocketHandler(ctx, n.tissue.Stream))
 		n.serverMux.HandleFunc(WORLD_TEXTURE_ENDPOINT, n.tissue.RenderRootMatrix)
@@ -362,6 +372,128 @@ func (n *Node) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (n *Node) InteractionsLogin(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	loginRequest := &InteractionLoginRequest{}
+	message, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Request was malformed."))
+		return
+	}
+	err = proto.Unmarshal(message, loginRequest)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Request was malformed."))
+		return
+	}
+	token, err := uuid.Parse(loginRequest.GetSessionToken())
+	if err != nil {
+		// Request UUID was non-existent malformed, create a new one.
+		token, err = uuid.NewRandom()
+		if err != nil {
+			panic("Unable to generate session token")
+		}
+	}
+	name := fmt.Sprint(time.Now().Unix())
+	nanobot_, _ := n.nanobotManager.nanobots.LoadOrStore(token, &Nanobot{
+		name:         name,
+		sessionToken: token,
+		render: &Renderable{
+			id:            MakeRenderId("Nanobot"),
+			visible:       false,
+			position:      image.Point{},
+			targetX:       0,
+			targetY:       0,
+			targetZ:       0,
+			lastPositions: &ring.Ring{},
+		},
+	})
+	nanobot := nanobot_.(*Nanobot)
+	nanobot.RenewExpiry()
+	nanobot.organ = n
+	nanobot.Start(ctx)
+	data, err := proto.Marshal(&InteractionLoginResponse{
+		SessionToken: token.String(),
+		Expiry:       int32(nanobot.expiry.Unix()),
+		RenderId:     string(nanobot.render.id),
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Unable to login right now"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(data)
+}
+
+func (n *Node) InteractionStream(ctx context.Context, connection *Connection) {
+	fmt.Println("Interaction socket opened")
+	defer connection.Close()
+	for {
+		_, r, err := connection.NextReader()
+		if err != nil {
+			fmt.Println("Interaction socket closed", err)
+			return
+		}
+		data, err := io.ReadAll(r)
+		response := &InteractionResponse{
+			Status:       InteractionResponse_success,
+			ErrorMessage: "",
+		}
+		if err != nil {
+			message := "Unable to parse interaction request"
+			fmt.Println(message, err)
+			response.Status = InteractionResponse_failure
+			response.ErrorMessage = message
+		}
+		request := &InteractionRequest{}
+		err = proto.Unmarshal(data, request)
+		if err != nil {
+			message := "Unable to parse interaction request"
+			fmt.Println(message, err)
+			response.Status = InteractionResponse_failure
+			response.ErrorMessage = message
+		}
+		token, err := uuid.Parse(request.SessionToken)
+		nanobot, ok := n.nanobotManager.nanobots.Load(token)
+		if ok {
+			toClose, err := nanobot.(*Nanobot).ProcessInteraction(request)
+			if err != nil {
+				fmt.Println("", err)
+				response.Status = InteractionResponse_failure
+				response.ErrorMessage = fmt.Sprint(err)
+			}
+			if toClose {
+				b := nanobot.(*Nanobot)
+				n.nanobotManager.nanobots.Delete(b.sessionToken)
+				b.CleanUp()
+			}
+		} else {
+			message := "Invalid session token, please refresh"
+			fmt.Println(message, err)
+			response.Status = InteractionResponse_failure
+			response.ErrorMessage = message
+		}
+		out, err := proto.Marshal(response)
+		if err != nil {
+			fmt.Println("Failed to encode renderable:", err)
+			response.Status = InteractionResponse_failure
+			response.ErrorMessage = "Internal error occured"
+		}
+		err = connection.WriteMessage(websocket.BinaryMessage, out)
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				fmt.Printf("error: %v %v", err, response)
+			} else {
+				fmt.Println("Interaction socket closed")
+			}
+			return
+		}
+
+	}
 }
 
 func (n *Node) Connect(ctx context.Context, origin, websocketUrl string, transportUrl string, edgeType EdgeType) error {

@@ -125,4 +125,36 @@ message Position  {
     int32 x = 1;
     int32 y = 2;
     int32 z = 3;
-} 
+}
+
+message InteractionLoginRequest {
+    string session_token = 1; 
+}
+
+message InteractionLoginResponse {
+    string session_token = 1;
+    int32 expiry = 2;
+    string render_id = 3;
+}
+
+message InteractionRequest {
+    string session_token = 1;
+    InteractionType type = 2;
+    Position position = 3;
+    
+    enum InteractionType {
+        close = 0;
+        nothing = 1;
+        move = 2;
+    }
+}
+
+message InteractionResponse {
+    Status status = 1;
+    string error_message = 2;
+
+    enum Status {
+        failure = 0;
+        success = 1;
+    }
+}

@@ -144,7 +144,7 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 	}
 	// Infection test.
 	node := b.lungNodes[0]
-	node.verbose = true
+	node.verbose = false
 	cellTypes = []CellType{
 		CellType_Bacteria,
 		CellType_Bacteria,

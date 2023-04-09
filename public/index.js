@@ -2,11 +2,19 @@ import {html, render} from 'https://unpkg.com/lit-html?module';
 
 goog.require('proto.efflux.RenderableSocketData');
 goog.require('proto.efflux.StatusSocketData');
+goog.require('proto.efflux.InteractionLoginRequest');
+goog.require('proto.efflux.InteractionLoginResponse');
+goog.require('proto.efflux.InteractionRequest');
+goog.require('proto.efflux.InteractionResponse');
+goog.require('proto.efflux.Position');
+
 
 const NodeMap = new Map();
 const PendingCloseSockets = new WeakMap();
 const LastRenderTime = new Map();
 const RENDER_TIMEOUT = 3000; // 3s
+const GET_CELL_TYPE_REGEX = new RegExp(/([a-z]+)[0-9]+$/i);
+let activeNode = null;
 
 const cy = cytoscape({
 
@@ -54,11 +62,29 @@ const layout = {
     avoidOverlapPadding: 10,
 };
 
+function getHttpAddress(address) {
+    address = address.replace('wss://', 'https://')
+                     .replace('ws://', 'http://');
+    if (!address.startsWith('http')) {
+        const scheme = window.location.protocol == "https:" ? 'https://' : 'http://';
+        address = `${scheme}${address}`;
+    }
+    return address;
+}
+
+function getWebSocketAddress(address) {
+    address = address.replace('https://', 'wss://')
+                     .replace('http://', 'ws://');
+    if (!address.startsWith('ws')) {
+        const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
+        address = `${scheme}${address}`;
+    }
+    return address;
+}
+
+
 class Node {
     constructor(address) {
-        if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
-            address = `ws://${address.replace('https://', '').replace('http://', '')}`;
-        }
         this.address = address;
         this.id = address.replace( /\D/g, '');
         this.name = `Unknown ${this.id}`;
@@ -67,13 +93,14 @@ class Node {
         this.socket = null;
         this.edges = new WeakSet();
         this.render = null;
+        this.interaction = null;
         this.active = false;
         this.renderCyNode();
-        this.setupStatusConnection(address);
+        this.setupStatusConnection(this.address);
     }
 
     async setupStatusConnection(address) {
-        const socket = new WebSocket(address + '/status')
+        const socket = new WebSocket(getWebSocketAddress(address + '/status'))
         socket.binaryType = "arraybuffer";
         try {
             this.processStatusSocket(await new Promise((resolve, reject) => {
@@ -198,16 +225,46 @@ class Node {
         optgroup.appendChild(container.firstElementChild);
     }
 
-    async renderScene() {
+    async start() {
         if (!this.render) {
             this.render = new Render(this);
         }
-        await this.collapseScene();
+        this.active = true;
+        await this.render.renderScene()
+        if (!this.interaction) {
+            this.interaction = new Interaction(this);
+        }
+        await this.interaction.setup();
+    }
+
+    async stop() {
+        this.active = false;
+        await this.render.collapse()
+        await this.interaction.tearDown();
+    }
+
+    processClick(vec3, el) {
+        this.interaction.processClick(vec3, el);
+    } 
+}
+
+class Render {
+    constructor(node) {
+        this.node = node;
+        this.activeSocket = null;
+        this.renderableDataBuffer = [];
+    }
+
+    async renderScene() {
+        await this.collapse();
         const renderContainer = document.querySelector('.render')
         renderContainer.classList.add('show')
         let scene = document.querySelector('.render a-scene');
         if (!scene) {
-            render(html`<a-scene embedded>
+            render(html`<a-scene
+                    embedded
+                    cursor="rayOrigin: mouse"
+                    raycaster="objects: .clickable">
                 <a-assets timeout="10000000">
                     <img id="background" src="background.png">
                 </a-assets>
@@ -219,18 +276,25 @@ class Node {
             </a-scene>
             <div class="panel"></div>`, renderContainer);
         }
-        this.setUpScene();
+        const container = document.createElement('div');
+        render(html`<button class="close" @click="${() => {
+            this.node.stop();
+        }}">Close</button>
+        <details>
+            <summary>Info</summary>
+            <p class="details"></p>
+        </details>`, container);
+        document.querySelector('.panel').appendChild(container);
         document.querySelector('.render').classList.add('show');
-        await this.render.setupRender(this.address);
+        await this.setupRenderSocket(this.node.address);
     }
 
-    async collapseScene() {
-        this.active = false;
+    async collapse() {
         // May be called multiple times.
         for (const el of document.querySelectorAll('.disposable')) {
             el.remove();
         }
-        await this.render?.close();
+        await this.closeSocket();
         const renderContainer = document.querySelector('.render')
         renderContainer?.classList?.remove('show')
         const panel = document.querySelector('.panel');
@@ -239,30 +303,9 @@ class Node {
         }
     }
 
-    setUpScene() {
-        this.active = true;
-        const container = document.createElement('div');
-        render(html`<button class="close" @click="${() => {
-            this.collapseScene();
-        }}">Close</button>
-        <details>
-            <summary>Info</summary>
-            <p class="details"></p>
-        </details>`, container);
-        document.querySelector('.panel').appendChild(container);
-    }
-}
-
-class Render {
-    constructor(node) {
-        this.node = node;
-        this.activeSocket = null;
-        this.renderableDataBuffer = [];
-    }
-
-    async setupRender(address) {
+    async setupRenderSocket(address) {
         this.setupRenderTexture(address);
-        const socket = new WebSocket(address + '/render/stream')
+        const socket = new WebSocket(getWebSocketAddress(address + '/render/stream'))
         socket.binaryType = "arraybuffer";
         try {
             await new Promise((resolve, reject) => {
@@ -296,12 +339,13 @@ class Render {
         const container = document.createElement('div');
         render(html`
             <a-plane
-                class="texture disposable"
+                class="texture disposable clickable"
                 material="src:#background; repeat: 1 1;"
                 height="100"
                 width="100"
                 position="0 0 0"
-                rotation="0 0 0">
+                rotation="0 0 0"
+                clickhandler>
             </a-plane>
         `, container);
         const el = container.firstElementChild;
@@ -311,8 +355,7 @@ class Render {
         }
         scene.appendChild(el);
         return new Promise((resolve, reject) => {
-            const httpAddress = address.replace('wss://', 'https://')
-                                       .replace('ws://', 'http://');
+            const httpAddress = getHttpAddress(address);
             const loader = new THREE.TextureLoader();
             loader.load(`${httpAddress}/render/texture`, 
                 resolve,     // onLoadCallback
@@ -356,7 +399,7 @@ class Render {
         });
     }
 
-    close() {
+    closeSocket() {
         const toClose = this.activeSocket; 
         this.activeSocket = null;
         toClose?.close();
@@ -378,15 +421,29 @@ class Render {
             if (!el) {
                 const color = getCellColor(id);
                 const container = document.createElement('div');
-                render(html`
-                    <a-sphere
-                        id="${id}"
-                        class="cell disposable"
-                        radius="${getSize(id)}"
-                        color="${color}"
-                        position="${x} ${-y} ${z}">
-                    </a-sphere>
-                `, container);
+                if (id.startsWith('Nanobot')) {
+                    render(html`
+                        <a-box
+                            id="${id}"
+                            class="cell disposable"
+                            width="${getSize(id)}"
+                            height="${getSize(id)}"
+                            depth="${getSize(id)}"
+                            color="${color}"
+                            position="${x} ${-y} ${z}">
+                        </a-box>
+                    `, container);
+                } else {
+                    render(html`
+                        <a-sphere
+                            id="${id}"
+                            class="cell disposable"
+                            radius="${getSize(id)}"
+                            color="${color}"
+                            position="${x} ${-y} ${z}">
+                        </a-sphere>
+                    `, container);
+                }
                 el = container.firstElementChild;
                 const planes = document.querySelectorAll('a-plane');
                 const plane = planes[z] || planes[0];
@@ -427,14 +484,121 @@ class Render {
     }
 }
 
-var getCellType = new RegExp(/([a-z]+)[0-9]+$/i);
+class Interaction {
+    constructor(node) {
+        this.node = node;
+        this.activeSocket = null;
+        this.renderId = '';
+    }
+
+    async setup() {
+        let sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionLoginRequest();
+        request.setSessionToken(sessionToken || '');
+        const loginFetch = await fetch(getHttpAddress(this.node.address) + '/interactions/login', {
+            method: 'POST',
+            mode: 'cors',
+            body: request.serializeBinary(),
+        });
+        const loginData = await loginFetch.arrayBuffer();
+        const loginResponse = proto.efflux.InteractionLoginResponse.deserializeBinary(loginData).toObject();
+        if (loginResponse.sessionToken && loginResponse.expiry) {
+            sessionToken = loginResponse.sessionToken;
+            localStorage.setItem('SessionToken', `${sessionToken}`);
+            localStorage.setItem('Expiry', `${loginResponse.expiry}`);
+            this.renderId = loginResponse.renderId;
+        }
+        await this.setupInteractionSocket(this.node.address); 
+    }
+
+    async setupInteractionSocket(address) {
+        const socket = new WebSocket(getWebSocketAddress(address + '/interactions/stream'))
+        socket.binaryType = 'arraybuffer';
+        try {
+            await new Promise((resolve, reject) => {
+                socket.onopen = () => {
+                    resolve(socket);
+                };
+                socket.onerror = reject;
+            });
+            console.log('Connected Interaction:', this.node.address);
+            this.activeSocket = socket;
+            socket.onmessage = (event) => {
+                this.getInteractionData(event);
+            }
+            const closePromise = new Promise((resolve) => {
+                socket.onclose = () => {
+                    PendingCloseSockets.delete(socket);
+                    console.log('Closed Interaction:', this.node.address);
+                    resolve();
+                };
+            });
+            PendingCloseSockets.set(socket, closePromise);
+        } catch (err) {
+            console.error('Connection refused:', address, err);
+            socket.close();
+        }
+    }
+
+    closeSocket() {
+        const toClose = this.activeSocket;
+        this.activeSocket = null;
+        toClose?.close();
+        return PendingCloseSockets.get(toClose);
+    }
+
+    async tearDown() {
+        // Signal clean up before closing.
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionRequest.InteractionType.CLOSE);
+        this.activeSocket.send(request.serializeBinary());
+        await this.closeSocket();
+    }
+
+    async getInteractionData({data}) {
+        if (!data instanceof Blob) {
+            return;
+        }
+        try {
+            const interactionData = proto.efflux.InteractionResponse.deserializeBinary(data).toObject();
+            if (interactionData.status == proto.efflux.InteractionResponse.Status.FAILURE) {
+                console.error(interactionData.errorMessage);
+            }
+        } catch (e) {
+            // console.error("Render Error:", e);
+            return;
+        }
+    }
+
+    processClick(vec3, el) {
+        if (!this.activeSocket) {
+            return;
+        }
+        if (el.tagName == 'A-PLANE') {
+            const sessionToken = localStorage.getItem('SessionToken');
+            const request = new proto.efflux.InteractionRequest();
+            request.setSessionToken(sessionToken || '');
+            request.setType(proto.efflux.InteractionRequest.InteractionType.MOVE);
+
+            const position = new proto.efflux.Position();
+            position.setX(Math.round(vec3.x));
+            position.setY(Math.round(-vec3.y));
+            request.setPosition(position)
+            this.activeSocket.send(request.serializeBinary());
+        }
+    }
+}
 
 function getCellColor(id) {
     if (!id) {
         return 'red';
     }
-    const match = id.match(getCellType) || []
+    const match = id.match(GET_CELL_TYPE_REGEX) || []
     switch (match[1]) {
+        case 'Nanobot':
+            return "gray";
         case 'Bacteria':
             return 'yellowgreen';
         case 'Bacteroidota':
@@ -448,7 +612,7 @@ function getCellColor(id) {
         case 'Macrophagocyte':
             return 'coral';
         case 'Dendritic':
-            return 'teal';
+            return 'navy';
         case 'Neutrocyte':
             return 'yellow';
         case 'NaturalKillerCell':
@@ -481,8 +645,10 @@ function getSize(id) {
     if (!id) {
         return 1;
     }
-    const match = id.match(getCellType) || []
+    const match = id.match(GET_CELL_TYPE_REGEX) || []
     switch (match[1]) {
+        case 'Nanobot':
+            return 1.25;
         case 'Bacteria':
             return 0.5;
         case 'Macrophagocyte':
@@ -505,17 +671,28 @@ function init() {
     const selector = document.querySelector('select');
     selector.addEventListener('input', () => {
         cy.fit(cy.$(selector.value));
-    })
-    const scheme = window.location.protocol == "https:" ? 'wss://' : 'ws://';
-    const root = new Node(`${scheme}${window.location.hostname}:8000`);
+    });
+    const root = new Node(`${getWebSocketAddress(window.location.hostname)}:8000`);
     NodeMap.set(root.address, root);
     layout.roots = [root.id];
 
-    cy.on('click', 'node', (e) => {
+    AFRAME.registerComponent('clickhandler', {
+        init: function() { // <-- Note: Don't use arrow notation here.
+          this.el.addEventListener('click', e => {
+              let point = e.detail.intersection.point
+              activeNode?.processClick(point, e.target);
+          })
+        }
+      })
+
+    const handleNodeClick = (e) => {
         const clickedNode = e.target;
         const node = NodeMap.get(clickedNode.data('address'));
-        node?.renderScene()
-      });
+        activeNode = node;
+        node?.start();
+    };
+    cy.on('click', 'node', handleNodeClick);
+    cy.on('touchstart', 'node', handleNodeClick);
     setInterval(garbageCollector, RENDER_TIMEOUT);
 }
 

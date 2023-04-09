@@ -1731,7 +1731,9 @@ func (t *VirginTCell) ShouldActivate(d *DendriticCell) {
 		t.Organ().materialPool.PutHormone(&HormoneBlob{
 			interleukin_2: HORMONE_TCELL_DROP,
 		})
-		fmt.Println("T Cell activated in ", t.organ)
+		if t.Verbose() {
+			fmt.Println("T Cell activated in ", t.organ)
+		}
 	}
 }
 
@@ -1938,7 +1940,7 @@ func (b *BCell) ShouldActivate(t *HelperTCell) {
 			t.mhc_ii.SetPresented([]Protein{protein})
 		}
 	}
-	if len(b.mhc_ii.presented) > 0 {
+	if b.Verbose() && len(b.mhc_ii.presented) > 0 {
 		fmt.Println("B Cell activated in ", t.organ)
 	}
 }

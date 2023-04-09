@@ -101,7 +101,9 @@ func (p *ProteinFunction) Run(ctx context.Context, cell CellActor) bool {
 
 func hasOrganOrCleanup(ctx context.Context, cell CellActor) bool {
 	if cell.Organ() == nil {
-		fmt.Printf("Force killed: %v\n", cell)
+		if cell.Verbose() {
+			fmt.Printf("Force killed: %v\n", cell)
+		}
 		defer cell.CleanUp()
 		return false
 	}
@@ -223,7 +225,9 @@ func ShouldApoptosis(ctx context.Context, cell CellActor) bool {
 }
 
 func Apoptosis(ctx context.Context, cell CellActor) bool {
-	fmt.Println(cell, " Died in", cell.Organ())
+	if cell.Verbose() {
+		fmt.Println(cell, " Died in", cell.Organ())
+	}
 	cell.Apoptosis(true)
 	return false
 }

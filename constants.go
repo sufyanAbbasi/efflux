@@ -10,6 +10,8 @@ const STATUS_ENDPOINT = "/status"
 const TRANSPORT_ENDPOINT = "/transport"
 const WORLD_RENDER_ENDPOINT = "/render/stream"
 const WORLD_TEXTURE_ENDPOINT = "/render/texture"
+const INTERACTIONS_LOGIN_ENDPOINT = "/interactions/login"
+const INTERACTIONS_STREAM_ENDPOINT = "/interactions/stream"
 
 const ORIGIN = "http://localhost/"
 const URL_TEMPLATE = "http://localhost:%v"
@@ -29,6 +31,11 @@ const POSITION_TRACKER_SIZE = 9 * 3
 const SPAWN_DISPLACEMENT = 6
 const RENDER_STREAM_TICK_RATE = time.Second / 10
 const STATUS_SOCKET_CLOCK_RATE = 3 * time.Second
+
+const NANOBOT_SESSION_DURATION = 15 * time.Minute
+const NANOBOT_SESSION_IDLE = 3 * time.Minute
+const NANOBOT_GC_CLOCK_RATE = 30 * time.Second
+const NANOBOT_LOOP_DURATION = 250 * time.Millisecond
 
 const PROKARYOTIC_PROTEIN_RANGE = uint16(20000)
 const PROKARYOTIC_PROTEIN_START = uint16(0)
