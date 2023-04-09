@@ -131,7 +131,7 @@ func (a *AntigenPool) SampleVirusProteins(sampleRate int64) (proteins []Protein)
 	a.viralLoads.Range(func(_, v any) bool {
 		viralLoad := v.(*ViralLoad)
 		viralLoad.Lock()
-		if viralLoad.concentration > 0 {
+		if viralLoad.concentration > 0 && viralLoad.GetInfectionOddsResult() {
 			proteins = append(proteins, viralLoad.virus.dna.selfProteins...)
 			if viralLoad.concentration > sampleRate {
 				viralLoad.concentration -= sampleRate
@@ -262,6 +262,17 @@ type ViralLoad struct {
 	concentration int64
 }
 
+func (v *ViralLoad) GetInfectionOddsResult() bool {
+	if v.concentration >= v.virus.infectivity*MAX_INFECTION_ODDS {
+		// Cap the odds.
+		return rand.Intn(MAX_INFECTION_ODDS) == 0
+	}
+	// Generate a random number within the infectivity range. If the generated
+	// number is less than or equal to the concentration, then the cell was
+	// infected.
+	return rand.Int63n(v.virus.infectivity) <= v.concentration
+}
+
 func (v *ViralLoad) ShouldInfect(cell CellActor) bool {
 	v.RLock()
 	defer v.RUnlock()
@@ -271,14 +282,7 @@ func (v *ViralLoad) ShouldInfect(cell CellActor) bool {
 		v.virus.infectivity <= 0 {
 		return false
 	}
-	if v.concentration >= v.virus.infectivity*MAX_INFECTION_ODDS {
-		// Cap the odds.
-		return rand.Intn(MAX_INFECTION_ODDS) == 0
-	}
-	// Generate a random number within the infectivity range. If the generated
-	// number is less than or equal to the concentration, then the cell was
-	// infected.
-	return rand.Int63n(v.virus.infectivity) <= v.concentration
+	return v.GetInfectionOddsResult()
 }
 
 func (v *ViralLoad) Tick(antibodies []*AntibodyLoad) {
