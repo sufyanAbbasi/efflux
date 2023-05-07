@@ -13,12 +13,16 @@ import (
 
 type Nanobot struct {
 	sync.RWMutex
-	name         string
-	sessionToken uuid.UUID
-	expiry       time.Time
-	organ        *Node
-	render       *Renderable
-	stop         context.CancelFunc
+	name               string
+	sessionToken       uuid.UUID
+	expiry             time.Time
+	organ              *Node
+	render             *Renderable
+	stop               context.CancelFunc
+	attachToTargetCell bool
+	targetCell         RenderID
+	attachedTo         *Renderable
+	cellStatusBuffer   *ring.Ring
 }
 
 func (n *Nanobot) RenewExpiry() {
@@ -34,7 +38,8 @@ func (n *Nanobot) IsIdle() bool {
 }
 
 func (n *Nanobot) Start(ctx context.Context) {
-	// Can be called multiple talls.
+	// Start can be called multiple times.
+	n.cellStatusBuffer = ring.New(NANOBOT_CELL_STATUS_BUFFER_SIZE)
 	if n.stop != nil {
 		n.stop()
 	}
@@ -57,6 +62,19 @@ func (n *Nanobot) Loop(ctx context.Context) {
 			if tissue != nil {
 				tissue.Move(n.render)
 			}
+			if n.targetCell != "" && (n.attachToTargetCell || n.attachedTo != nil || n.render.followId != "") {
+				for _, c := range n.GetInteractions(ctx) {
+					if c.Render().id == n.targetCell {
+						if n.attachToTargetCell {
+							n.AttachCell(c)
+						}
+						if n.cellStatusBuffer.Len() > 0 {
+							n.cellStatusBuffer = n.cellStatusBuffer.Next()
+						}
+						n.cellStatusBuffer.Value = c.GetCellStatus()
+					}
+				}
+			}
 		}
 	}
 }
@@ -68,6 +86,8 @@ func (n *Nanobot) Stop() {
 }
 
 func (n *Nanobot) CleanUp() {
+	n.DetachCell()
+	n.render.followId = ""
 	n.render.visible = false
 	if n.organ != nil && n.organ.tissue != nil {
 		n.organ.tissue.Detach(n.render)
@@ -133,18 +153,85 @@ func (n *Nanobot) GetInteractions(ctx context.Context) (interactions []CellActor
 	return
 }
 
-func (n *Nanobot) ProcessInteraction(interaction *InteractionRequest) (bool, error) {
+func (n *Nanobot) ProcessInteraction(request *InteractionRequest, response *InteractionResponse) (bool, error) {
 	n.RenewExpiry()
 	n.render.visible = true
-	if interaction.Type == InteractionRequest_move {
-		position := interaction.Position
+	var err error
+	toClose := false
+	fmt.Println("got request", request.Type, request.TargetCell)
+	switch request.Type {
+	case InteractionType_close:
+		toClose = true
+		n.DetachCell()
+	case InteractionType_move_to:
+		n.render.followId = ""
+		position := request.Position
 		if position != nil {
 			n.SetTargetPoint(image.Point{int(position.X), int(position.Y)})
 		}
-	} else if interaction.Type == InteractionRequest_close {
-		return true, nil
+	case InteractionType_info:
+		n.DetachCell()
+		if request.TargetCell == "" {
+			err = fmt.Errorf("got info interaction but had empty target ID: %v", request.TargetCell)
+		} else {
+			target := RenderID(request.TargetCell)
+			n.targetCell = target
+		}
+	case InteractionType_follow:
+		if request.TargetCell == "" {
+			err = fmt.Errorf("got follow interaction but had empty target ID: %v", request.TargetCell)
+		} else {
+			n.targetCell = RenderID(request.TargetCell)
+		}
+		n.render.followId = n.targetCell
+	case InteractionType_attach:
+		if request.TargetCell == "" {
+			err = fmt.Errorf("got attach interaction but had empty target ID: %v", request.TargetCell)
+		} else {
+			n.targetCell = RenderID(request.TargetCell)
+			n.attachToTargetCell = true
+		}
+	case InteractionType_detach:
+		n.DetachCell()
 	}
-	return false, nil
+	if err != nil {
+		fmt.Println("", err)
+		response.Status = InteractionResponse_failure
+		response.ErrorMessage = fmt.Sprint(err)
+	} else {
+		response.Status = InteractionResponse_success
+		if n.attachedTo != nil {
+			response.AttachedTo = string(n.attachedTo.id)
+		}
+		if n.cellStatusBuffer != nil {
+
+			status, ok := n.cellStatusBuffer.Value.(*CellStatus)
+			if ok {
+				response.CellStatus = status
+				n.cellStatusBuffer.Value = nil
+			}
+
+		}
+	}
+	return toClose, err
+}
+
+func (n *Nanobot) AttachCell(c CellActor) {
+	n.DetachCell()
+	n.render.followId = ""
+	c.Render().followId = n.render.id
+	n.attachedTo = c.Render()
+	fmt.Println(n.render.id, "attached to", c.Render().id)
+}
+
+func (n *Nanobot) DetachCell() {
+	n.targetCell = ""
+	n.attachToTargetCell = false
+	if n.attachedTo != nil {
+		fmt.Println(n.render.id, "detached from", n.attachedTo.id)
+		n.attachedTo.followId = ""
+		n.attachedTo = nil
+	}
 }
 
 type NanobotManager struct {

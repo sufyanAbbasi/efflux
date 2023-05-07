@@ -180,7 +180,7 @@ class Node {
         this.label = labels.join('\n');
         cy.$(`#${this.id}`).data('label', this.label);
         if (this.active) {
-            const details = document.querySelector('.panel .details')
+            const details = document.querySelector('.panel .organ-details');
             if (details) {
                 render(labels.map((label) => html`<pre>${label}</pre>`), details);
             }
@@ -240,11 +240,11 @@ class Node {
     async stop() {
         this.active = false;
         await this.render.collapse()
-        await this.interaction.tearDown();
+        await this.interaction?.tearDown();
     }
 
     processClick(vec3, el) {
-        this.interaction.processClick(vec3, el);
+        this.interaction?.processClick(vec3, el);
     } 
 }
 
@@ -281,8 +281,16 @@ class Render {
             this.node.stop();
         }}">Close</button>
         <details>
-            <summary>Info</summary>
-            <p class="details"></p>
+            <summary>Organ Info</summary>
+            <p class="organ-details"></p>
+        </details>
+        <details>
+            <summary>Cell Info</summary>
+            <p class="cell-details"></p>
+        </details>
+        <details>
+            <summary>Actions</summary>
+            <div class="action-container"></div>
         </details>`, container);
         document.querySelector('.panel').appendChild(container);
         document.querySelector('.render').classList.add('show');
@@ -415,9 +423,10 @@ class Render {
                 visible,
                 position,
             } = renderables[i];
-            const {x, y, z} = position;
+            const {x, y, zIndex} = position;
             // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
             let el = document.querySelector(`#${id}`);
+            let z = id.startsWith('Nanobot') ? 2 : 0;
             if (!el) {
                 const color = getCellColor(id);
                 const container = document.createElement('div');
@@ -437,16 +446,17 @@ class Render {
                     render(html`
                         <a-sphere
                             id="${id}"
-                            class="cell disposable"
+                            class="cell disposable clickable"
                             radius="${getSize(id)}"
                             color="${color}"
-                            position="${x} ${-y} ${z}">
+                            position="${x} ${-y} ${z}"
+                            clickhandler>
                         </a-sphere>
                     `, container);
                 }
                 el = container.firstElementChild;
                 const planes = document.querySelectorAll('a-plane');
-                const plane = planes[z] || planes[0];
+                const plane = planes[zIndex] || planes[0];
                 if (!plane) {
                     return;
                 }
@@ -489,6 +499,8 @@ class Interaction {
         this.node = node;
         this.activeSocket = null;
         this.renderId = '';
+        this.cellStatus = null;
+        this.pingInterval = null;
     }
 
     async setup() {
@@ -528,12 +540,18 @@ class Interaction {
             }
             const closePromise = new Promise((resolve) => {
                 socket.onclose = () => {
+                    clearInterval(this.pingInterval);
+                    this.pingInterval = null;
                     PendingCloseSockets.delete(socket);
                     console.log('Closed Interaction:', this.node.address);
                     resolve();
                 };
             });
             PendingCloseSockets.set(socket, closePromise);
+            clearInterval(this.pingInterval);
+            this.pingInterval = window.setInterval(() => {
+                this.ping();
+            }, 1500);
         } catch (err) {
             console.error('Connection refused:', address, err);
             socket.close();
@@ -552,8 +570,8 @@ class Interaction {
         const sessionToken = localStorage.getItem('SessionToken');
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
-        request.setType(proto.efflux.InteractionRequest.InteractionType.CLOSE);
-        this.activeSocket.send(request.serializeBinary());
+        request.setType(proto.efflux.InteractionType.CLOSE);
+        this.activeSocket?.send(request.serializeBinary());
         await this.closeSocket();
     }
 
@@ -565,6 +583,35 @@ class Interaction {
             const interactionData = proto.efflux.InteractionResponse.deserializeBinary(data).toObject();
             if (interactionData.status == proto.efflux.InteractionResponse.Status.FAILURE) {
                 console.error(interactionData.errorMessage);
+            } else if (interactionData.cellStatus) {
+                this.cellStatus = interactionData.cellStatus;
+                const details = document.querySelector('.panel .cell-details');
+                if (details) {
+                    render(html`
+                    <p>Attached To: ${interactionData.attachedTo || 'None'}</p>
+                    <ul>
+                        <li>Name: ${this.cellStatus.renderId || 'Unknown'} (${this.cellStatus.name || 'Unknown'})</li>
+                        <li>CellType: ${this.cellStatus.cellType || 'Unknown'}</li>
+                        <li>Damage: ${this.cellStatus.damage}</li>
+                        <li>Spawn Time: ${this.cellStatus.spawnTime ? new Date(this.cellStatus.spawnTime * 1000) : 'Unknown'}</li>
+                        <li>Viral Load: ${this.cellStatus.viralLoad}</li>
+                        <!--<li>Transport Path: ${this.cellStatus.transportPathList?.filter((x) => x).join(', ')}</li>-->
+                        <!--<li>Want Path: ${this.cellStatus.wantPathList?.filter((x) => x).join(', ')}</li>-->
+                        <li>
+                            <details>
+                                <summary>Acquired Proteins: </summary>
+                                ${this.cellStatus.proteinsList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary>Presented Proteins:</summary>
+                                 ${this.cellStatus.presentedList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
+                            </details>
+                        </li>
+                        <li>Last updated: ${this.cellStatus.timestamp ? new Date(this.cellStatus.timestamp * 1000) : 'Unknown'}</li>
+                    </ul>`, details);
+                }
             }
         } catch (e) {
             // console.error("Render Error:", e);
@@ -572,22 +619,96 @@ class Interaction {
         }
     }
 
+    ping() {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.PING);
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
+    goTo(vec3, el) {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.MOVE_TO);
+        const position = new proto.efflux.Position();
+        position.setX(Math.round(vec3.x));
+        position.setY(Math.round(-vec3.y));
+        request.setPosition(position)
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
+    follow(vec3, el) {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.FOLLOW);
+        request.setTargetCell(el.id);
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
+    info(vec3, el) {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.INFO);
+        request.setTargetCell(el.id);
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
+    attach(vec3, el) {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.ATTACH);
+        request.setTargetCell(el.id);
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
+    detach(vec3, el) {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.DETACH);
+        request.setTargetCell(el.id);
+        this.activeSocket?.send(request.serializeBinary());
+    }
+
     processClick(vec3, el) {
         if (!this.activeSocket) {
             return;
         }
-        if (el.tagName == 'A-PLANE') {
-            const sessionToken = localStorage.getItem('SessionToken');
-            const request = new proto.efflux.InteractionRequest();
-            request.setSessionToken(sessionToken || '');
-            request.setType(proto.efflux.InteractionRequest.InteractionType.MOVE);
-
-            const position = new proto.efflux.Position();
-            position.setX(Math.round(vec3.x));
-            position.setY(Math.round(-vec3.y));
-            request.setPosition(position)
-            this.activeSocket.send(request.serializeBinary());
+        switch(el.tagName) {
+            case 'A-SPHERE':
+                const actionContainer = document.querySelector('.panel .action-container');
+                if (actionContainer) {
+                    render(html`
+                        <p>Targeting: ${el.id}</p>
+                        <button @click="${() => {
+                            this.follow(vec3, el);
+                            this.info(vec3, el);}
+                        }">
+                            Info
+                        </button>
+                        <button @click="${() => {
+                            this.follow(vec3, el);
+                            this.attach(vec3, el);}
+                        }">
+                            Attach
+                        </button>
+                        <button @click="${() => {
+                            this.detach(vec3, el);
+                        }}">
+                            Detach
+                        </button>`, actionContainer);
+                }
+                break;
+            case 'A-PLANE':
+                this.goTo(vec3, el);
+                break;
         }
+        
     }
 }
 

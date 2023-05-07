@@ -31,6 +31,7 @@ type Renderable struct {
 	position                  image.Point
 	targetX, targetY, targetZ int
 	lastPositions             *ring.Ring
+	followId                  RenderID
 }
 
 func (r *Renderable) SetVisible(visible bool) {
@@ -227,7 +228,13 @@ func (t *Tissue) Move(r *Renderable) {
 	if m == nil {
 		return
 	}
-	m.Move(r)
+	var targetRender *Renderable
+	if r.followId != "" {
+		targetRender = t.FindRender(r.followId)
+	} else {
+		r.followId = ""
+	}
+	m.Move(r, targetRender)
 }
 
 func (t *Tissue) AddCytokine(r *Renderable, cType CytokineType, concentration uint8) uint8 {
@@ -486,24 +493,36 @@ func (m *ExtracellularMatrix) Physics(r *Renderable) {
 	}
 }
 
-func (m *ExtracellularMatrix) Move(r *Renderable) {
+func (m *ExtracellularMatrix) Move(r *Renderable, targetRender *Renderable) {
 	m.ConstrainTargetBounds(r)
-	if r.targetX > r.position.X {
+
+	targetX := r.targetX
+	targetY := r.targetY
+	targetZ := r.targetZ
+
+	if targetRender != nil {
+		m.ConstrainTargetBounds(targetRender)
+		targetX = targetRender.position.X
+		targetY = targetRender.position.Y
+		targetZ = targetRender.targetZ
+	}
+
+	if targetX > r.position.X {
 		m.MoveX(r, 1)
 	}
-	if r.targetX < r.position.X {
+	if targetX < r.position.X {
 		m.MoveX(r, -1)
 	}
-	if r.targetY > r.position.Y {
+	if targetY > r.position.Y {
 		m.MoveY(r, 1)
 	}
-	if r.targetY < r.position.Y {
+	if targetY < r.position.Y {
 		m.MoveY(r, -1)
 	}
-	if r.targetZ > m.level {
+	if targetZ > m.level {
 		m.MoveUp(r)
 	}
-	if r.targetZ < m.level {
+	if targetZ < m.level {
 		m.MoveDown(r)
 	}
 	m.Physics(r)

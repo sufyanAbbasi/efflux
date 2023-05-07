@@ -25,6 +25,7 @@ type CellActor interface {
 	Verbose() bool
 	Tissue() *Tissue
 	Render() *Renderable
+	GetCellStatus() *CellStatus
 	DoesWork() bool
 	DoWork(ctx context.Context)
 	Position() image.Point
@@ -135,6 +136,37 @@ func (c *Cell) Tissue() *Tissue {
 
 func (c *Cell) Render() *Renderable {
 	return c.render
+}
+
+func (c *Cell) GetCellStatus() *CellStatus {
+	viralLoad := int64(0)
+	if c.viralLoad != nil {
+		viralLoad = int64(c.viralLoad.concentration)
+	}
+	var proteins []uint32
+	var presented []uint32
+	mhc_ii := c.MHC_II()
+	if mhc_ii != nil {
+		for p := range mhc_ii.proteins {
+			proteins = append(proteins, uint32(p))
+		}
+		for p := range mhc_ii.presented {
+			presented = append(presented, uint32(p))
+		}
+	}
+	return &CellStatus{
+		Timestamp:     time.Now().Unix(),
+		CellType:      c.cellType,
+		Name:          c.dna.name,
+		RenderId:      string(c.render.id),
+		Damage:        int32(c.damage),
+		SpawnTime:     c.spawnTime.Unix(),
+		ViralLoad:     viralLoad,
+		TransportPath: c.transportPath[:],
+		WantPath:      c.wantPath[:],
+		Proteins:      proteins,
+		Presented:     presented,
+	}
 }
 
 func (c *Cell) DNA() *DNA {
@@ -921,6 +953,9 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 				lastPositions: positionTracker,
 			},
 			transportPath: base.transportPath,
+			wantPath:      base.wantPath,
+			spawnTime:     base.spawnTime,
+			transportTime: base.transportTime,
 		},
 	}
 }
@@ -995,6 +1030,24 @@ func (i *Leukocyte) MHC_II() *MHC_II {
 	return i.mhc_ii
 }
 
+func (i *Leukocyte) GetCellStatus() *CellStatus {
+	status := i.Cell.GetCellStatus()
+	var proteins []uint32
+	var presented []uint32
+	mhc_ii := i.MHC_II()
+	if mhc_ii != nil {
+		for p := range mhc_ii.proteins {
+			proteins = append(proteins, uint32(p))
+		}
+		for p := range mhc_ii.presented {
+			presented = append(presented, uint32(p))
+		}
+	}
+	status.Proteins = proteins
+	status.Presented = presented
+	return status
+}
+
 func (i *Leukocyte) ShouldIncurDamage(ctx context.Context) bool {
 	return i.Cell.ShouldIncurDamage(ctx) || i.TimeLeft() < 0
 }
@@ -1050,6 +1103,9 @@ func (i *Leukocyte) CanTransport() bool {
 }
 
 func (i Leukocyte) ShouldTransport(ctx context.Context) bool {
+	if i.render.followId != "" {
+		return false
+	}
 	if i.TimeToTransport() > 0 || i.organ == nil {
 		return false
 	}
@@ -2129,6 +2185,9 @@ func (p *ProkaryoticCell) TimeToTransport() time.Duration {
 }
 
 func (p *ProkaryoticCell) ShouldTransport(ctx context.Context) bool {
+	if p.render.followId != "" {
+		return false
+	}
 	return p.TimeToTransport() < 0
 }
 

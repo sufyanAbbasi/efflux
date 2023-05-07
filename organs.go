@@ -438,11 +438,8 @@ func (n *Node) InteractionStream(ctx context.Context, connection *Connection) {
 			fmt.Println("Interaction socket closed", err)
 			return
 		}
+		response := &InteractionResponse{}
 		data, err := io.ReadAll(r)
-		response := &InteractionResponse{
-			Status:       InteractionResponse_success,
-			ErrorMessage: "",
-		}
 		if err != nil {
 			message := "Unable to parse interaction request"
 			fmt.Println(message, err)
@@ -456,26 +453,22 @@ func (n *Node) InteractionStream(ctx context.Context, connection *Connection) {
 			fmt.Println(message, err)
 			response.Status = InteractionResponse_failure
 			response.ErrorMessage = message
-		}
-		token, err := uuid.Parse(request.SessionToken)
-		nanobot, ok := n.nanobotManager.nanobots.Load(token)
-		if ok {
-			toClose, err := nanobot.(*Nanobot).ProcessInteraction(request)
-			if err != nil {
-				fmt.Println("", err)
-				response.Status = InteractionResponse_failure
-				response.ErrorMessage = fmt.Sprint(err)
-			}
-			if toClose {
-				b := nanobot.(*Nanobot)
-				n.nanobotManager.nanobots.Delete(b.sessionToken)
-				b.CleanUp()
-			}
 		} else {
-			message := "Invalid session token, please refresh"
-			fmt.Println(message, err)
-			response.Status = InteractionResponse_failure
-			response.ErrorMessage = message
+			token, err := uuid.Parse(request.SessionToken)
+			nanobot, ok := n.nanobotManager.nanobots.Load(token)
+			if ok {
+				toClose, err := nanobot.(*Nanobot).ProcessInteraction(request, response)
+				if toClose && err != nil {
+					b := nanobot.(*Nanobot)
+					n.nanobotManager.nanobots.Delete(b.sessionToken)
+					b.CleanUp()
+				}
+			} else {
+				message := "Invalid session token, please refresh"
+				fmt.Println(message, err)
+				response.Status = InteractionResponse_failure
+				response.ErrorMessage = message
+			}
 		}
 		out, err := proto.Marshal(response)
 		if err != nil {
