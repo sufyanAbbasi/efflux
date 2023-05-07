@@ -13,16 +13,17 @@ import (
 
 type Nanobot struct {
 	sync.RWMutex
-	name               string
-	sessionToken       uuid.UUID
-	expiry             time.Time
-	organ              *Node
-	render             *Renderable
-	stop               context.CancelFunc
-	attachToTargetCell bool
-	targetCell         RenderID
-	attachedTo         *Renderable
-	cellStatusBuffer   *ring.Ring
+	name                     string
+	sessionToken             uuid.UUID
+	expiry                   time.Time
+	organ                    *Node
+	render                   *Renderable
+	stop                     context.CancelFunc
+	attachToTargetCell       bool
+	targetCell               RenderID
+	attachedTo               *Renderable
+	targetCellStatusBuffer   *ring.Ring
+	attachedCellStatusBuffer *ring.Ring
 }
 
 func (n *Nanobot) RenewExpiry() {
@@ -39,7 +40,8 @@ func (n *Nanobot) IsIdle() bool {
 
 func (n *Nanobot) Start(ctx context.Context) {
 	// Start can be called multiple times.
-	n.cellStatusBuffer = ring.New(NANOBOT_CELL_STATUS_BUFFER_SIZE)
+	n.targetCellStatusBuffer = ring.New(NANOBOT_CELL_STATUS_BUFFER_SIZE)
+	n.attachedCellStatusBuffer = ring.New(NANOBOT_CELL_STATUS_BUFFER_SIZE)
 	if n.stop != nil {
 		n.stop()
 	}
@@ -68,10 +70,16 @@ func (n *Nanobot) Loop(ctx context.Context) {
 						if n.attachToTargetCell {
 							n.AttachCell(c)
 						}
-						if n.cellStatusBuffer.Len() > 0 {
-							n.cellStatusBuffer = n.cellStatusBuffer.Next()
+						if n.targetCellStatusBuffer.Len() > 0 {
+							n.targetCellStatusBuffer = n.targetCellStatusBuffer.Next()
 						}
-						n.cellStatusBuffer.Value = c.GetCellStatus()
+						n.targetCellStatusBuffer.Value = c.GetCellStatus()
+					}
+					if n.attachedTo != nil && c.Render().id == n.attachedTo.id {
+						if n.attachedCellStatusBuffer.Len() > 0 {
+							n.attachedCellStatusBuffer = n.attachedCellStatusBuffer.Next()
+						}
+						n.attachedCellStatusBuffer.Value = c.GetCellStatus()
 					}
 				}
 			}
@@ -170,7 +178,6 @@ func (n *Nanobot) ProcessInteraction(request *InteractionRequest, response *Inte
 			n.SetTargetPoint(image.Point{int(position.X), int(position.Y)})
 		}
 	case InteractionType_info:
-		n.DetachCell()
 		if request.TargetCell == "" {
 			err = fmt.Errorf("got info interaction but had empty target ID: %v", request.TargetCell)
 		} else {
@@ -203,12 +210,19 @@ func (n *Nanobot) ProcessInteraction(request *InteractionRequest, response *Inte
 		if n.attachedTo != nil {
 			response.AttachedTo = string(n.attachedTo.id)
 		}
-		if n.cellStatusBuffer != nil {
-
-			status, ok := n.cellStatusBuffer.Value.(*CellStatus)
+		if n.targetCellStatusBuffer != nil {
+			status, ok := n.targetCellStatusBuffer.Value.(*CellStatus)
 			if ok {
-				response.CellStatus = status
-				n.cellStatusBuffer.Value = nil
+				response.TargetCellStatus = status
+				n.targetCellStatusBuffer.Value = nil
+			}
+
+		}
+		if n.attachedCellStatusBuffer != nil {
+			status, ok := n.attachedCellStatusBuffer.Value.(*CellStatus)
+			if ok {
+				response.AttachedCellStatus = status
+				n.attachedCellStatusBuffer.Value = nil
 			}
 
 		}

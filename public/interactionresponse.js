@@ -77,7 +77,8 @@ proto.efflux.InteractionResponse.toObject = function(includeInstance, msg) {
     status: jspb.Message.getFieldWithDefault(msg, 2, 0),
     errorMessage: jspb.Message.getFieldWithDefault(msg, 3, ""),
     attachedTo: jspb.Message.getFieldWithDefault(msg, 4, ""),
-    cellStatus: (f = msg.getCellStatus()) && proto.efflux.CellStatus.toObject(includeInstance, f)
+    targetCellStatus: (f = msg.getTargetCellStatus()) && proto.efflux.CellStatus.toObject(includeInstance, f),
+    attachedCellStatus: (f = msg.getAttachedCellStatus()) && proto.efflux.CellStatus.toObject(includeInstance, f)
   };
 
   if (includeInstance) {
@@ -133,7 +134,12 @@ proto.efflux.InteractionResponse.deserializeBinaryFromReader = function(msg, rea
     case 5:
       var value = new proto.efflux.CellStatus;
       reader.readMessage(value,proto.efflux.CellStatus.deserializeBinaryFromReader);
-      msg.setCellStatus(value);
+      msg.setTargetCellStatus(value);
+      break;
+    case 6:
+      var value = new proto.efflux.CellStatus;
+      reader.readMessage(value,proto.efflux.CellStatus.deserializeBinaryFromReader);
+      msg.setAttachedCellStatus(value);
       break;
     default:
       reader.skipField();
@@ -192,10 +198,18 @@ proto.efflux.InteractionResponse.serializeBinaryToWriter = function(message, wri
       f
     );
   }
-  f = message.getCellStatus();
+  f = message.getTargetCellStatus();
   if (f != null) {
     writer.writeMessage(
       5,
+      f,
+      proto.efflux.CellStatus.serializeBinaryToWriter
+    );
+  }
+  f = message.getAttachedCellStatus();
+  if (f != null) {
+    writer.writeMessage(
+      6,
       f,
       proto.efflux.CellStatus.serializeBinaryToWriter
     );
@@ -284,10 +298,10 @@ proto.efflux.InteractionResponse.prototype.setAttachedTo = function(value) {
 
 
 /**
- * optional CellStatus cell_status = 5;
+ * optional CellStatus target_cell_status = 5;
  * @return {?proto.efflux.CellStatus}
  */
-proto.efflux.InteractionResponse.prototype.getCellStatus = function() {
+proto.efflux.InteractionResponse.prototype.getTargetCellStatus = function() {
   return /** @type{?proto.efflux.CellStatus} */ (
     jspb.Message.getWrapperField(this, proto.efflux.CellStatus, 5));
 };
@@ -297,7 +311,7 @@ proto.efflux.InteractionResponse.prototype.getCellStatus = function() {
  * @param {?proto.efflux.CellStatus|undefined} value
  * @return {!proto.efflux.InteractionResponse} returns this
 */
-proto.efflux.InteractionResponse.prototype.setCellStatus = function(value) {
+proto.efflux.InteractionResponse.prototype.setTargetCellStatus = function(value) {
   return jspb.Message.setWrapperField(this, 5, value);
 };
 
@@ -306,8 +320,8 @@ proto.efflux.InteractionResponse.prototype.setCellStatus = function(value) {
  * Clears the message field making it undefined.
  * @return {!proto.efflux.InteractionResponse} returns this
  */
-proto.efflux.InteractionResponse.prototype.clearCellStatus = function() {
-  return this.setCellStatus(undefined);
+proto.efflux.InteractionResponse.prototype.clearTargetCellStatus = function() {
+  return this.setTargetCellStatus(undefined);
 };
 
 
@@ -315,8 +329,45 @@ proto.efflux.InteractionResponse.prototype.clearCellStatus = function() {
  * Returns whether this field is set.
  * @return {boolean}
  */
-proto.efflux.InteractionResponse.prototype.hasCellStatus = function() {
+proto.efflux.InteractionResponse.prototype.hasTargetCellStatus = function() {
   return jspb.Message.getField(this, 5) != null;
+};
+
+
+/**
+ * optional CellStatus attached_cell_status = 6;
+ * @return {?proto.efflux.CellStatus}
+ */
+proto.efflux.InteractionResponse.prototype.getAttachedCellStatus = function() {
+  return /** @type{?proto.efflux.CellStatus} */ (
+    jspb.Message.getWrapperField(this, proto.efflux.CellStatus, 6));
+};
+
+
+/**
+ * @param {?proto.efflux.CellStatus|undefined} value
+ * @return {!proto.efflux.InteractionResponse} returns this
+*/
+proto.efflux.InteractionResponse.prototype.setAttachedCellStatus = function(value) {
+  return jspb.Message.setWrapperField(this, 6, value);
+};
+
+
+/**
+ * Clears the message field making it undefined.
+ * @return {!proto.efflux.InteractionResponse} returns this
+ */
+proto.efflux.InteractionResponse.prototype.clearAttachedCellStatus = function() {
+  return this.setAttachedCellStatus(undefined);
+};
+
+
+/**
+ * Returns whether this field is set.
+ * @return {boolean}
+ */
+proto.efflux.InteractionResponse.prototype.hasAttachedCellStatus = function() {
+  return jspb.Message.getField(this, 6) != null;
 };
 
 

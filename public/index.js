@@ -13,6 +13,7 @@ const NodeMap = new Map();
 const PendingCloseSockets = new WeakMap();
 const LastRenderTime = new Map();
 const RENDER_TIMEOUT = 3000; // 3s
+const PING_INTERVAL = 3000; // 3s
 const GET_CELL_TYPE_REGEX = new RegExp(/([a-z]+)[0-9]+$/i);
 let activeNode = null;
 
@@ -499,8 +500,9 @@ class Interaction {
         this.node = node;
         this.activeSocket = null;
         this.renderId = '';
-        this.cellStatus = null;
         this.pingInterval = null;
+        this.targetCellStatus = null;
+        this.attachedCellStatus = null;
     }
 
     async setup() {
@@ -551,7 +553,7 @@ class Interaction {
             clearInterval(this.pingInterval);
             this.pingInterval = window.setInterval(() => {
                 this.ping();
-            }, 1500);
+            }, PING_INTERVAL);
         } catch (err) {
             console.error('Connection refused:', address, err);
             socket.close();
@@ -583,40 +585,62 @@ class Interaction {
             const interactionData = proto.efflux.InteractionResponse.deserializeBinary(data).toObject();
             if (interactionData.status == proto.efflux.InteractionResponse.Status.FAILURE) {
                 console.error(interactionData.errorMessage);
-            } else if (interactionData.cellStatus) {
-                this.cellStatus = interactionData.cellStatus;
-                const details = document.querySelector('.panel .cell-details');
-                if (details) {
-                    render(html`
-                    <p>Attached To: ${interactionData.attachedTo || 'None'}</p>
-                    <ul>
-                        <li>Name: ${this.cellStatus.renderId || 'Unknown'} (${this.cellStatus.name || 'Unknown'})</li>
-                        <li>CellType: ${this.cellStatus.cellType || 'Unknown'}</li>
-                        <li>Damage: ${this.cellStatus.damage}</li>
-                        <li>Spawn Time: ${this.cellStatus.spawnTime ? new Date(this.cellStatus.spawnTime * 1000) : 'Unknown'}</li>
-                        <li>Viral Load: ${this.cellStatus.viralLoad}</li>
-                        <!--<li>Transport Path: ${this.cellStatus.transportPathList?.filter((x) => x).join(', ')}</li>-->
-                        <!--<li>Want Path: ${this.cellStatus.wantPathList?.filter((x) => x).join(', ')}</li>-->
-                        <li>
-                            <details>
-                                <summary>Acquired Proteins: </summary>
-                                ${this.cellStatus.proteinsList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
-                            </details>
-                        </li>
-                        <li>
-                            <details>
-                                <summary>Presented Proteins:</summary>
-                                 ${this.cellStatus.presentedList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
-                            </details>
-                        </li>
-                        <li>Last updated: ${this.cellStatus.timestamp ? new Date(this.cellStatus.timestamp * 1000) : 'Unknown'}</li>
-                    </ul>`, details);
-                }
             }
+            this.renderInteractionData(interactionData);
         } catch (e) {
             // console.error("Render Error:", e);
             return;
         }
+    }
+
+    renderInteractionData(interactionData) {
+        const details = document.querySelector('.panel .cell-details');
+        if (details) {
+            if (interactionData.targetCellStatus) {
+                this.targetCellStatus = interactionData.targetCellStatus;
+            }
+            if (interactionData.attachedCellStatus) {
+                this.attachedCellStatus = interactionData.attachedCellStatus;
+            } else if (!interactionData.attachedTo) {
+                this.attachedCellStatus = null;
+            }
+            render(html`<p>Attached To: ${interactionData.attachedTo || 'None'}</p>
+                        <details>
+                            <summary>Target Cell Status:</summary>
+                            ${this.renderCellStatus(this.targetCellStatus)}
+                        </details>
+                        <details>
+                            <summary>Attached Cell Status:</summary>
+                            ${this.renderCellStatus(this.attachedCellStatus)}
+                        </details>
+                    `, details);
+        }
+    }
+
+    renderCellStatus(cellStatus) {
+        return cellStatus ? html`
+            <ul>
+                <li>Name: ${cellStatus.renderId || 'Unknown'} (${cellStatus.name || 'Unknown'})</li>
+                <li>CellType: ${cellStatus.cellType || 'Unknown'}</li>
+                <li>Damage: ${cellStatus.damage}</li>
+                <li>Spawn Time: ${cellStatus.spawnTime ? new Date(cellStatus.spawnTime * 1000) : 'Unknown'}</li>
+                <li>Viral Load: ${cellStatus.viralLoad}</li>
+                <!--<li>Transport Path: ${cellStatus.transportPathList?.filter((x) => x).join(', ')}</li>-->
+                <!--<li>Want Path: ${cellStatus.wantPathList?.filter((x) => x).join(', ')}</li>-->
+                <li>
+                    <details>
+                        <summary>Acquired Proteins: </summary>
+                        ${cellStatus.proteinsList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Presented Proteins:</summary>
+                        ${cellStatus.presentedList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
+                    </details>
+                </li>
+                <li>Last updated: ${cellStatus.timestamp ? new Date(cellStatus.timestamp * 1000) : 'Unknown'}</li>
+            </ul>` : null;
     }
 
     ping() {
@@ -671,7 +695,6 @@ class Interaction {
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.DETACH);
-        request.setTargetCell(el.id);
         this.activeSocket?.send(request.serializeBinary());
     }
 
