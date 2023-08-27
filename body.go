@@ -142,20 +142,24 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			}
 		}
 	}
+	InfectBody(b)
+}
+
+func InfectBody(b *Body) {
 	// Infection test.
 	node := b.lungNodes[0]
 	node.verbose = false
-	cellTypes = []CellType{
+	cellTypes := []CellType{
 		CellType_Bacteria,
 		CellType_Bacteria,
 		CellType_ViralLoadCarrier,
 	}
-	counts = []int{
+	counts := []int{
 		0,
 		10,
-		1,
+		0,
 	}
-	names = []string{
+	names := []string{
 		"Clostridium tetani",
 		"Streptococcus pneumoniae",
 		"SARS-COV-2",
@@ -170,25 +174,6 @@ func (b *Body) GenerateCellsAndStart(ctx context.Context) {
 			MakeTransportRequest(node.transportUrl, names[i], dna[i], cellType, WorkType_nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
 		}
 	}
-	// Immune cell test.
-	cellTypes = []CellType{
-		CellType_Neutrocyte,
-		CellType_Macrophagocyte,
-		CellType_NaturalKillerCell,
-		CellType_Dendritic,
-	}
-	counts = []int{
-		0,
-		0,
-		0,
-		0,
-	}
-	for i, cellType := range cellTypes {
-		for j := 0; j < counts[i]; j++ {
-			MakeTransportRequest(node.transportUrl, HUMAN_NAME, humanDNA, cellType, WorkType_nothing, "", time.Now(), [10]string{}, [10]string{}, nil)
-		}
-	}
-
 }
 
 func GenerateBody(ctx context.Context) *Body {

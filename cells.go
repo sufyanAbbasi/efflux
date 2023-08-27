@@ -68,6 +68,7 @@ type CellActor interface {
 	ViralLoad() *ViralLoad
 	AddViralLoad(*ViralLoad)
 	MHC_II() *MHC_II
+	ReportCellAction(CellActionStatus)
 }
 
 func BroadcastExistence(ctx context.Context, c CellActor) {
@@ -89,8 +90,8 @@ type Cell struct {
 	organ         *Node
 	resourceNeed  *ResourceBlob
 	damage        int
-	function      *StateDiagram
 	oxygenated    bool
+	function      *StateDiagram
 	render        *Renderable
 	stop          context.CancelFunc
 	transportPath [10]string
@@ -99,6 +100,7 @@ type Cell struct {
 	transportTime time.Time
 	antibodyLoad  *AntibodyLoad
 	viralLoad     *ViralLoad
+	cellActions   *ring.Ring
 }
 
 func (c *Cell) String() string {
@@ -138,6 +140,13 @@ func (c *Cell) Render() *Renderable {
 	return c.render
 }
 
+func (c *Cell) ReportCellAction(action CellActionStatus) {
+	if c.cellActions != nil {
+		c.cellActions.Value = action
+		c.cellActions = c.cellActions.Next()
+	}
+}
+
 func (c *Cell) GetCellStatus() *CellStatus {
 	viralLoad := int64(0)
 	if c.viralLoad != nil {
@@ -154,6 +163,15 @@ func (c *Cell) GetCellStatus() *CellStatus {
 			presented = append(presented, uint32(p))
 		}
 	}
+	var cellActions []CellActionStatus
+	if c.cellActions != nil {
+		c.cellActions.Do(func(p any) {
+			if p != nil {
+				cellActions = append(cellActions, p.(CellActionStatus))
+			}
+		})
+	}
+
 	return &CellStatus{
 		Timestamp:     time.Now().Unix(),
 		CellType:      c.cellType,
@@ -166,6 +184,7 @@ func (c *Cell) GetCellStatus() *CellStatus {
 		WantPath:      c.wantPath[:],
 		Proteins:      proteins,
 		Presented:     presented,
+		CellActions:   cellActions,
 	}
 }
 
@@ -211,6 +230,9 @@ func (c *Cell) Repair(damage int) {
 	} else {
 		c.damage -= damage
 	}
+	if damage > 0 {
+		c.ReportCellAction(CellActionStatus_repair)
+	}
 }
 
 func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
@@ -230,6 +252,9 @@ func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
 
 func (c *Cell) IncurDamage(damage int) {
 	c.damage += int(damage)
+	if damage > 0 {
+		c.ReportCellAction(CellActionStatus_incur_damage)
+	}
 }
 
 func (c *Cell) CleanUp() {
@@ -241,6 +266,7 @@ func (c *Cell) CleanUp() {
 	if c.Verbose() {
 		fmt.Println("Despawned:", c, "in", c.organ)
 	}
+	c.ReportCellAction(CellActionStatus_despawn)
 	c.organ = nil
 }
 
@@ -257,6 +283,7 @@ func (c *Cell) Apoptosis(release bool) {
 			go c.organ.antigenPool.DepositProteins(c.dna.selfProteins)
 		}
 	}
+	c.ReportCellAction(CellActionStatus_apoptosis)
 	c.CleanUp()
 }
 
@@ -338,6 +365,7 @@ func (c *Cell) Work(ctx context.Context, request Work) Work {
 	request.status = 200
 	request.result = "Completed."
 	c.ProduceWaste()
+	c.ReportCellAction(CellActionStatus_do_work)
 	c.Unlock()
 	return request
 }
@@ -765,6 +793,7 @@ func Transport(c CellActor) bool {
 	if c.CellType() == CellType_Bacteria {
 		fmt.Println("Bacteria transported to", edge.transportUrl)
 	}
+	c.ReportCellAction(CellActionStatus_transport)
 	return true
 }
 
@@ -867,6 +896,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 		return false
 	}
 	MakeTransportRequest(e.organ.transportUrl, e.dna.name, e.dna, e.cellType, e.workType, string(e.render.id), time.Now(), e.transportPath, e.wantPath, map[Protein]bool{})
+	e.ReportCellAction(CellActionStatus_mitosis)
 	return true
 }
 
@@ -956,6 +986,7 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 			wantPath:      base.wantPath,
 			spawnTime:     base.spawnTime,
 			transportTime: base.transportTime,
+			cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 		},
 	}
 }
@@ -1383,6 +1414,7 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1493,6 +1525,7 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1605,6 +1638,7 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1671,6 +1705,7 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1761,6 +1796,7 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1832,6 +1868,7 @@ func CopyVirginTCell(base *VirginTCell) *VirginTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1911,6 +1948,7 @@ func CopyHelperTCell(base *HelperTCell) *HelperTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -1975,6 +2013,7 @@ func CopyKillerTCell(base *KillerTCell) *KillerTCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -2040,6 +2079,7 @@ func CopyBCell(base *BCell) *BCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -2102,6 +2142,7 @@ func CopyEffectorBCell(base *EffectorBCell) *EffectorBCell {
 				wantPath:      base.wantPath,
 				spawnTime:     base.spawnTime,
 				transportTime: base.transportTime,
+				cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 			},
 			lifeSpan:      base.lifeSpan,
 			transportSpan: base.transportSpan,
@@ -2149,6 +2190,7 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 			wantPath:      base.wantPath,
 			spawnTime:     base.spawnTime,
 			transportTime: base.transportTime,
+			cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 		},
 		generationTime:     generationTime,
 		lastGenerationTime: time.Now(),
@@ -2260,6 +2302,7 @@ func CopyViralLoadCarrier(base *VirusCarrier) *VirusCarrier {
 			wantPath:      base.wantPath,
 			spawnTime:     base.spawnTime,
 			transportTime: base.transportTime,
+			cellActions:   ring.New(CELL_ACTIONS_BUFFER),
 		},
 		virus: &Virus{
 			dna:            base.dna,

@@ -127,6 +127,17 @@ message Position  {
     int32 z = 3;
 }
 
+enum CellActionStatus {
+    do_nothing = 0;
+    repair = 1;
+    incur_damage = 2;
+    despawn = 3;
+    apoptosis = 4;
+    do_work = 5;
+    transport = 6;
+    mitosis = 7;
+}
+
 message CellStatus {
     int64 timestamp = 1;
     CellType cell_type = 2;
@@ -139,6 +150,7 @@ message CellStatus {
     repeated string want_path = 9;
     repeated uint32 proteins = 10;
     repeated uint32 presented = 11;
+    repeated CellActionStatus cell_actions = 12;
 }
 
 message InteractionLoginRequest {

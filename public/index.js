@@ -625,8 +625,8 @@ class Interaction {
                 <li>Damage: ${cellStatus.damage}</li>
                 <li>Spawn Time: ${cellStatus.spawnTime ? new Date(cellStatus.spawnTime * 1000) : 'Unknown'}</li>
                 <li>Viral Load: ${cellStatus.viralLoad}</li>
-                <!--<li>Transport Path: ${cellStatus.transportPathList?.filter((x) => x).join(', ')}</li>-->
-                <!--<li>Want Path: ${cellStatus.wantPathList?.filter((x) => x).join(', ')}</li>-->
+               <li>Transport Path: ${cellStatus.transportPathList?.filter((x) => x).join(', ')}</li>
+               <li>Want Path: ${cellStatus.wantPathList?.filter((x) => x).join(', ')}</li>
                 <li>
                     <details>
                         <summary>Acquired Proteins: </summary>
@@ -639,6 +639,7 @@ class Interaction {
                         ${cellStatus.presentedList?.filter((x) => x).sort((a, b) => b - a).join(', ')}
                     </details>
                 </li>
+                <li>Cell Actions: ${cellStatus.cellActionsList?.filter((x) => x).join(', ')}</li>
                 <li>Last updated: ${cellStatus.timestamp ? new Date(cellStatus.timestamp * 1000) : 'Unknown'}</li>
             </ul>` : null;
     }
