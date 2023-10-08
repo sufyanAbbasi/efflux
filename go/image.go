@@ -84,7 +84,7 @@ func WriteChunk(buf *bytes.Buffer, b []byte, name string) error {
 }
 
 func (b BaseImage) Download() {
-	f, err := os.Create("public/background.png")
+	f, err := os.Create("./public/background.png")
 	if err != nil {
 		log.Fatal(err)
 	}

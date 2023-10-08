@@ -10,9 +10,9 @@ Keeps You Alive"](https://www.philippdettmer.net/immune).
 - Make sure to have Go installed on your machine.
 - In a terminal window, run
   ```bash
-  go run .
+make
   ```
-- Visit the status page at http://localhost:3000/public.
+- Visit the status page at http://localhost:3000.
 - You can click on a node to render it!
 
 ## Concepts
