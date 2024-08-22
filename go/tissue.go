@@ -32,6 +32,7 @@ type Renderable struct {
 	targetX, targetY, targetZ int
 	lastPositions             *ring.Ring
 	followId                  RenderID
+	ignoreWalls               bool
 }
 
 func (r *Renderable) SetVisible(visible bool) {
@@ -239,7 +240,7 @@ func (t *Tissue) Move(r *Renderable) {
 
 func (t *Tissue) AddCytokine(r *Renderable, cType CytokineType, concentration uint8) uint8 {
 	m := t.FindMatrix(r)
-	if m == nil {
+	if m == nil || cType == CytokineType_unknown {
 		return 0
 	}
 	return m.AddCytokine(r.position, cType, concentration)
@@ -391,10 +392,10 @@ func (m *ExtracellularMatrix) At(x, y int) color.Color {
 
 func (m *ExtracellularMatrix) GetCytokineColor(pt image.Point) color.Color {
 	cTypes := []CytokineType{
-		cell_damage,
-		antigen_present,
-		induce_chemotaxis,
-		cytotoxins,
+		CytokineType_cell_damage,
+		CytokineType_antigen_present,
+		CytokineType_induce_chemotaxis,
+		CytokineType_cytotoxins,
 	}
 	concentrations := m.GetCytokineContentrations([]image.Point{pt}, cTypes)[0]
 	var hues []float64
@@ -404,16 +405,16 @@ func (m *ExtracellularMatrix) GetCytokineColor(pt image.Point) color.Color {
 		if concentration > 0 {
 			var h float64
 			switch t {
-			case cell_damage:
+			case CytokineType_cell_damage:
 				// Red.
 				h = 0
-			case cytotoxins:
+			case CytokineType_cytotoxins:
 				// Pink.
 				h = float64(280) / float64(360)
-			case antigen_present:
+			case CytokineType_antigen_present:
 				// Orange.
 				h = float64(25) / float64(360)
-			case induce_chemotaxis:
+			case CytokineType_induce_chemotaxis:
 				// Green.
 				h = float64(125) / float64(360)
 			}
@@ -473,7 +474,7 @@ func (m *ExtracellularMatrix) ConstrainTargetBounds(r *Renderable) {
 }
 
 func (m *ExtracellularMatrix) Physics(r *Renderable) {
-	if !m.walls.InBounds(r.position) {
+	if !m.walls.InBounds(r.position) && !r.ignoreWalls {
 		dx := 0
 		dy := 0
 		if r.position.X > m.walls.mainStage.center.X {
@@ -658,6 +659,9 @@ func (m *ExtracellularMatrix) GetCytokinesAtPoint(pt image.Point) *sync.Map {
 }
 
 func (m *ExtracellularMatrix) AddCytokine(pt image.Point, t CytokineType, concentration uint8) uint8 {
+	if t == CytokineType_unknown {
+		return 0
+	}
 	cytokines := m.GetCytokinesAtPoint(pt)
 	c, _ := cytokines.LoadOrStore(t, MakeCytokine(pt, t, concentration))
 	return c.(*Cytokine).Add(concentration)

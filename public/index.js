@@ -1,12 +1,14 @@
-import {html, render} from 'https://unpkg.com/lit-html@latest/lit-html.js';
+import {html, render, nothing} from '//unpkg.com/lit-html@latest/lit-html.js';
+import '//unpkg.com/cytoscape@latest/dist/cytoscape.min.js';
 
-goog.require('proto.efflux.RenderableSocketData');
-goog.require('proto.efflux.StatusSocketData');
+goog.require('proto.efflux.CytokineType');
 goog.require('proto.efflux.InteractionLoginRequest');
 goog.require('proto.efflux.InteractionLoginResponse');
 goog.require('proto.efflux.InteractionRequest');
 goog.require('proto.efflux.InteractionResponse');
 goog.require('proto.efflux.Position');
+goog.require('proto.efflux.RenderableSocketData');
+goog.require('proto.efflux.StatusSocketData');
 
 
 const NodeMap = new Map();
@@ -231,10 +233,10 @@ class Node {
             this.render = new Render(this);
         }
         this.active = true;
-        await this.render.renderScene()
         if (!this.interaction) {
             this.interaction = new Interaction(this);
         }
+        await this.render.renderScene()
         await this.interaction.setup();
     }
 
@@ -291,7 +293,9 @@ class Render {
         </details>
         <details>
             <summary>Actions</summary>
-            <div class="action-container"></div>
+            <div class="action-container">
+                ${this.node.interaction.renderDefaultActions()}
+            </div>
         </details>`, container);
         document.querySelector('.panel').appendChild(container);
         document.querySelector('.render').classList.add('show');
@@ -699,6 +703,37 @@ class Interaction {
         this.activeSocket?.send(request.serializeBinary());
     }
 
+    dropCytokine() {
+        const sessionToken = localStorage.getItem('SessionToken');
+        const request = new proto.efflux.InteractionRequest();
+        request.setSessionToken(sessionToken || '');
+        request.setType(proto.efflux.InteractionType.DROP_CYTOKINE);
+        const cytokinType = document.querySelector('select[name="cytokine-type"]')?.value ?? 0;
+        request.setCytokineType(cytokinType);
+        this.activeSocket?.send(request.serializeBinary());        
+    }
+
+    renderDefaultActions() {
+        return html`
+            <button @click="${() => {
+                this.dropCytokine();
+            }}">
+                Drop Cytokine
+            </button>
+            <select name="cytokine-type">
+                ${Object.keys(proto.efflux.CytokineType).map((key) => {
+                    if (key == 'UNKNOWN') {
+                        return nothing;
+                    } else {
+                        return html`<option value="${proto.efflux.CytokineType[key]}">
+                            ${key.toLowerCase().replace('_', ' ')}
+                        </option>`
+                    }
+                })}
+            </select>
+        `
+    }
+
     processClick(vec3, el) {
         if (!this.activeSocket) {
             return;
@@ -725,7 +760,8 @@ class Interaction {
                             this.detach(vec3, el);
                         }}">
                             Detach
-                        </button>`, actionContainer);
+                        </button>
+                        ${this.renderDefaultActions()}`, actionContainer);
                 }
                 break;
             case 'A-PLANE':
@@ -813,7 +849,7 @@ function garbageCollector() {
 }
 
 function init() {
-    const selector = document.querySelector('select');
+    const selector = document.querySelector('select[name="nodes"]')
     selector.addEventListener('input', () => {
         cy.fit(cy.$(selector.value));
     });

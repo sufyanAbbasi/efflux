@@ -11,19 +11,17 @@
 /* eslint-disable */
 // @ts-nocheck
 
-goog.provide('proto.efflux.InteractionType');
+goog.provide('proto.efflux.CytokineType');
 
 /**
  * @enum {number}
  */
-proto.efflux.InteractionType = {
-  PING: 0,
-  CLOSE: 1,
-  MOVE_TO: 2,
-  FOLLOW: 3,
-  ATTACH: 4,
-  DETACH: 5,
-  INFO: 6,
-  DROP_CYTOKINE: 7
+proto.efflux.CytokineType = {
+  UNKNOWN: 0,
+  CELL_DAMAGE: 1,
+  CELL_STRESSED: 2,
+  ANTIGEN_PRESENT: 3,
+  INDUCE_CHEMOTAXIS: 4,
+  CYTOTOXINS: 5
 };
 

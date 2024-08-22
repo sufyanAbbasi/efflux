@@ -7,16 +7,6 @@ import (
 	"time"
 )
 
-type CytokineType int
-
-const (
-	cell_damage CytokineType = iota
-	cell_stressed
-	antigen_present
-	induce_chemotaxis
-	cytotoxins
-)
-
 func Gaussian(sigma, x float64) float64 {
 	return (1 / (sigma * math.Sqrt(2*math.Pi))) * math.Exp(-0.5*math.Pow(x, 2)/math.Pow(sigma, 2))
 }

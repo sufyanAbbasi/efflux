@@ -106,6 +106,15 @@ message MaterialStatusSocketData {
     int32 antibody_load = 15;
 }
 
+enum CytokineType {
+    unknown = 0;
+	cell_damage = 1;
+	cell_stressed = 2;
+	antigen_present = 3;
+	induce_chemotaxis = 4;
+	cytotoxins = 5;
+}
+
 message StatusSocketData {
 	int32 status = 1;
 	string name = 2;
@@ -171,6 +180,7 @@ enum InteractionType {
     attach = 4;
     detach = 5;
     info = 6;
+    drop_cytokine = 7;
 }
 
 message InteractionRequest {
@@ -178,6 +188,7 @@ message InteractionRequest {
     InteractionType type = 2;
     Position position = 3;
     string target_cell = 4;
+    CytokineType cytokine_type = 5;
 }
 
 message InteractionResponse {

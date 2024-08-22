@@ -247,7 +247,7 @@ func (c *Cell) ShouldIncurDamage(ctx context.Context) bool {
 	return hasAntibodies ||
 		waste.creatinine >= DAMAGE_CREATININE_THRESHOLD ||
 		waste.co2 >= DAMAGE_CO2_THRESHOLD ||
-		c.GetCytokineConcentrationAt(cytotoxins, c.Position()) > CYTOTOXIN_DAMAGE_THRESHOLD
+		c.GetCytokineConcentrationAt(CytokineType_cytotoxins, c.Position()) > CYTOTOXIN_DAMAGE_THRESHOLD
 }
 
 func (c *Cell) IncurDamage(damage int) {
@@ -514,7 +514,7 @@ func (c *Cell) ProduceWaste() {
 				vitamins: BACTERIA_VITAMIN_PRODUCTION,
 			})
 		case CellType_Bacteria:
-			c.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
+			c.DropCytokine(CytokineType_cytotoxins, CYTOKINE_CYTOTOXINS)
 			fallthrough
 		case CellType_Cardiomyocyte:
 			fallthrough
@@ -902,7 +902,7 @@ func (e *EukaryoticCell) Mitosis(ctx context.Context) bool {
 
 func (e *EukaryoticCell) IncurDamage(damage int) {
 	e.Cell.IncurDamage(damage)
-	e.DropCytokine(cell_damage, CYTOKINE_CELL_DAMAGE)
+	e.DropCytokine(CytokineType_cell_damage, CYTOKINE_CELL_DAMAGE)
 	if e.Organ() != nil {
 		e.Organ().materialPool.PutLigand(&LigandBlob{
 			inflammation: LIGAND_INFLAMMATION_CELL_DAMAGE,
@@ -1171,8 +1171,8 @@ func (i *Leukocyte) IsAntigen(antigen *Antigen) bool {
 
 func (i *Leukocyte) FoundAntigenCytokine() bool {
 	_, concentrations := i.GetNearestCytokines([]CytokineType{
-		cell_stressed,
-		antigen_present,
+		CytokineType_cell_stressed,
+		CytokineType_antigen_present,
 	})
 	foundCytokine := false
 	for i := range concentrations {
@@ -1474,7 +1474,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 	//      made of DNA and toxins to keep them in place and cause damage. If
 	//      there is a high concentration of antigen_present cytokine, then
 	//      NETosis is triggered, or its nearing the end of its life.
-	antigenPresentConcentration := n.GetCytokineConcentrationAt(antigen_present, c.Position())
+	antigenPresentConcentration := n.GetCytokineConcentrationAt(CytokineType_antigen_present, c.Position())
 	// Check if pathogen has been covered in antibodies.
 	hasAntibodies := c.AntibodyLoad() != nil && c.AntibodyLoad().concentration > 0
 	// Check if enough time has passed that the pathogen is covered in opsonins.
@@ -1483,7 +1483,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 		n.TimeLeft() < NEUTROPHIL_LIFE_SPAN/3) {
 		n.inNETosis = true
 	} else {
-		n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		n.DropCytokine(CytokineType_antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 	}
 	if n.inNETosis {
 		n.Trap(c)
@@ -1493,7 +1493,7 @@ func (n *Neutrophil) Interact(ctx context.Context, c CellActor) {
 		n.Trap(c)
 		c.Apoptosis(false)
 	} else {
-		n.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
+		n.DropCytokine(CytokineType_cytotoxins, CYTOKINE_CYTOTOXINS)
 	}
 	n.IncreaseInflammation()
 }
@@ -1606,7 +1606,7 @@ func (m *Macrophage) Interact(ctx context.Context, c CellActor) {
 		c.Apoptosis(false)
 		// Pick up protein signatures for presentation.
 		m.mhc_ii.SetProteins(antigen.proteins)
-		m.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		m.DropCytokine(CytokineType_antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		m.IncreaseInflammation()
 	}
 }
@@ -1665,7 +1665,7 @@ func (n *NaturalKiller) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
 	// If bacteria, the best we can do is signal that it is here.
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
-		n.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		n.DropCytokine(CytokineType_antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		n.IncreaseInflammation()
 		return
 	}
@@ -1743,7 +1743,7 @@ func (d *DendriticCell) DoWork(ctx context.Context) {
 	}
 	// Looking for Virgin T Cells to present to, so draw them closer.
 	if len(d.mhc_ii.proteins) > 0 {
-		d.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
+		d.DropCytokine(CytokineType_induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 	}
 }
 
@@ -1751,7 +1751,7 @@ func (d *DendriticCell) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
 	// If bacteria, we can phagocytosis but only if it's at a damage threshold.
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
-		d.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		d.DropCytokine(CytokineType_antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		d.IncreaseInflammation()
 		if c.Damage() >= DENDRITIC_PHAGOCYTOSIS_DAMAGE_TRESHOLD {
 			c.Apoptosis(false)
@@ -1897,14 +1897,14 @@ func (t *HelperTCell) DoesWork() bool {
 
 func (t *HelperTCell) DoWork(ctx context.Context) {
 	// Looking for B Cells to present to, so draw them closer.
-	t.DropCytokine(induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
+	t.DropCytokine(CytokineType_induce_chemotaxis, CYTOKINE_CHEMO_TAXIS)
 }
 
 func (t *HelperTCell) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
 	// If bacteria, the best we can do is signal that it is here.
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
-		t.DropCytokine(antigen_present, CYTOKINE_ANTIGEN_PRESENT)
+		t.DropCytokine(CytokineType_antigen_present, CYTOKINE_ANTIGEN_PRESENT)
 		t.IncreaseInflammation()
 		return
 	}
@@ -1975,7 +1975,7 @@ func (t *KillerTCell) Interact(ctx context.Context, c CellActor) {
 	antigen := c.PresentAntigen()
 	// If bacteria, drop cytotoxins and increase inflammation.
 	if antigen.mollecular_pattern == BACTERIA_MOLECULAR_MOTIF {
-		t.DropCytokine(cytotoxins, CYTOKINE_CYTOTOXINS)
+		t.DropCytokine(CytokineType_cytotoxins, CYTOKINE_CYTOTOXINS)
 		t.IncreaseInflammation()
 		return
 	}

@@ -200,6 +200,13 @@ func (n *Nanobot) ProcessInteraction(request *InteractionRequest, response *Inte
 		}
 	case InteractionType_detach:
 		n.DetachCell()
+	case InteractionType_drop_cytokine:
+		fmt.Println("got cytokine", request.CytokineType)
+		if request.CytokineType == CytokineType_unknown {
+			err = fmt.Errorf("got drop cytokine interaction but had empty cytokine: %v", request.CytokineType)
+		} else {
+			n.DropCytokine(request.CytokineType)
+		}
 	}
 	if err != nil {
 		fmt.Println("", err)
@@ -245,6 +252,13 @@ func (n *Nanobot) DetachCell() {
 		fmt.Println(n.render.id, "detached from", n.attachedTo.id)
 		n.attachedTo.followId = ""
 		n.attachedTo = nil
+	}
+}
+
+func (n *Nanobot) DropCytokine(t CytokineType) {
+	tissue := n.Tissue()
+	if tissue != nil {
+		tissue.AddCytokine(n.render, t, NANOBOT_CYTOKINE_CONCENTRATION)
 	}
 }
 

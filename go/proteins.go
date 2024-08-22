@@ -152,28 +152,28 @@ func Explore(ctx context.Context, cell CellActor) bool {
 }
 
 func MoveTowardsChemotaxisCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveTowardsCytokines([]CytokineType{induce_chemotaxis}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{CytokineType_induce_chemotaxis}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
 func MoveTowardsCellDamageCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveTowardsCytokines([]CytokineType{cell_damage}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{CytokineType_cell_damage}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
 func MoveTowardsCellStressCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveTowardsCytokines([]CytokineType{cell_stressed}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{CytokineType_cell_stressed}) {
 		return Explore(ctx, cell)
 	}
 	return true
 }
 
 func MoveTowardsAntigenPresentCytokineOrExplore(ctx context.Context, cell CellActor) bool {
-	if !cell.MoveTowardsCytokines([]CytokineType{antigen_present}) {
+	if !cell.MoveTowardsCytokines([]CytokineType{CytokineType_antigen_present}) {
 		return Explore(ctx, cell)
 	}
 	return true
@@ -647,7 +647,7 @@ func MakeStateDiagramByEukaryote(c CellActor, dna *DNA) *StateDiagram {
 func BacteriaMoveAwayFromCytokinesOrExplore(ctx context.Context, cell CellActor) bool {
 	if rand.Intn(5) == 0 {
 		return Explore(ctx, cell)
-	} else if !cell.MoveAwayFromCytokines([]CytokineType{cytotoxins}) {
+	} else if !cell.MoveAwayFromCytokines([]CytokineType{CytokineType_cytotoxins}) {
 		return Explore(ctx, cell)
 	}
 	return true
@@ -764,7 +764,7 @@ func ProduceInterferon(ctx context.Context, cell CellActor) bool {
 		return true
 	}
 	if viralLoad.concentration%INTERFERON_PRODUCTION_MOD == 0 {
-		cell.DropCytokine(cell_stressed, CYTOKINE_CELL_STRESSED)
+		cell.DropCytokine(CytokineType_cell_stressed, CYTOKINE_CELL_STRESSED)
 	}
 	return true
 }
