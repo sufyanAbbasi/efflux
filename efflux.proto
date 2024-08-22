@@ -117,8 +117,8 @@ message StatusSocketData {
 
 message RenderableSocketData {
     string id = 1;
-	bool visible = 3;
-	Position position = 4;
+	bool visible = 2;
+	Position position = 3;
 }
 
 message Position  {
