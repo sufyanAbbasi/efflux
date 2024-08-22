@@ -1,12 +1,10 @@
 all: install build run
 
 install:
+	npm i
 	npm install grpc-tools --global
 	command -v protoc-gen-go >/dev/null 2>&1 || go install github.com/golang/protobuf/protoc-gen-go@latest
 	command -v cargo >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-install:
-	npm i
 	# See https://github.com/tikv/grpc-rs
 	cargo install protobuf-codegen
 	cargo install grpcio-compiler

@@ -1,4 +1,4 @@
-import {html, render} from 'https://unpkg.com/lit-html?module';
+import {html, render} from 'https://unpkg.com/lit-html@latest/lit-html.js';
 
 goog.require('proto.efflux.RenderableSocketData');
 goog.require('proto.efflux.StatusSocketData');
