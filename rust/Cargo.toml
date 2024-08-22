@@ -5,4 +5,11 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "efflux"
+path = "src/efflux/efflux.rs"
+
 [dependencies]
+ecdsa = "0.16.8"
+elliptic-curve = "0.13.6"
+protobuf = "3.3.0"

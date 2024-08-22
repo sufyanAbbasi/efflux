@@ -72,7 +72,7 @@ proto.efflux.RenderableSocketData.prototype.toObject = function(opt_includeInsta
 proto.efflux.RenderableSocketData.toObject = function(includeInstance, msg) {
   var f, obj = {
     id: jspb.Message.getFieldWithDefault(msg, 1, ""),
-    visible: jspb.Message.getBooleanFieldWithDefault(msg, 3, false),
+    visible: jspb.Message.getBooleanFieldWithDefault(msg, 2, false),
     position: (f = msg.getPosition()) && proto.efflux.Position.toObject(includeInstance, f)
   };
 
@@ -114,11 +114,11 @@ proto.efflux.RenderableSocketData.deserializeBinaryFromReader = function(msg, re
       var value = /** @type {string} */ (reader.readString());
       msg.setId(value);
       break;
-    case 3:
+    case 2:
       var value = /** @type {boolean} */ (reader.readBool());
       msg.setVisible(value);
       break;
-    case 4:
+    case 3:
       var value = new proto.efflux.Position;
       reader.readMessage(value,proto.efflux.Position.deserializeBinaryFromReader);
       msg.setPosition(value);
@@ -162,14 +162,14 @@ proto.efflux.RenderableSocketData.serializeBinaryToWriter = function(message, wr
   f = message.getVisible();
   if (f) {
     writer.writeBool(
-      3,
+      2,
       f
     );
   }
   f = message.getPosition();
   if (f != null) {
     writer.writeMessage(
-      4,
+      3,
       f,
       proto.efflux.Position.serializeBinaryToWriter
     );
@@ -196,11 +196,11 @@ proto.efflux.RenderableSocketData.prototype.setId = function(value) {
 
 
 /**
- * optional bool visible = 3;
+ * optional bool visible = 2;
  * @return {boolean}
  */
 proto.efflux.RenderableSocketData.prototype.getVisible = function() {
-  return /** @type {boolean} */ (jspb.Message.getBooleanFieldWithDefault(this, 3, false));
+  return /** @type {boolean} */ (jspb.Message.getBooleanFieldWithDefault(this, 2, false));
 };
 
 
@@ -209,17 +209,17 @@ proto.efflux.RenderableSocketData.prototype.getVisible = function() {
  * @return {!proto.efflux.RenderableSocketData} returns this
  */
 proto.efflux.RenderableSocketData.prototype.setVisible = function(value) {
-  return jspb.Message.setProto3BooleanField(this, 3, value);
+  return jspb.Message.setProto3BooleanField(this, 2, value);
 };
 
 
 /**
- * optional Position position = 4;
+ * optional Position position = 3;
  * @return {?proto.efflux.Position}
  */
 proto.efflux.RenderableSocketData.prototype.getPosition = function() {
   return /** @type{?proto.efflux.Position} */ (
-    jspb.Message.getWrapperField(this, proto.efflux.Position, 4));
+    jspb.Message.getWrapperField(this, proto.efflux.Position, 3));
 };
 
 
@@ -228,7 +228,7 @@ proto.efflux.RenderableSocketData.prototype.getPosition = function() {
  * @return {!proto.efflux.RenderableSocketData} returns this
 */
 proto.efflux.RenderableSocketData.prototype.setPosition = function(value) {
-  return jspb.Message.setWrapperField(this, 4, value);
+  return jspb.Message.setWrapperField(this, 3, value);
 };
 
 
@@ -246,7 +246,7 @@ proto.efflux.RenderableSocketData.prototype.clearPosition = function() {
  * @return {boolean}
  */
 proto.efflux.RenderableSocketData.prototype.hasPosition = function() {
-  return jspb.Message.getField(this, 4) != null;
+  return jspb.Message.getField(this, 3) != null;
 };
 
 
