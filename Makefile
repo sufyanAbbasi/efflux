@@ -1,4 +1,9 @@
-all: build run
+all: install build run
+
+install:
+	npm install grpc-tools --global
+	command -v protoc-gen-go >/dev/null 2>&1 || go install github.com/golang/protobuf/protoc-gen-go@latest
+	command -v cargo >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 gen:
 	grpc_tools_node_protoc -I=./ --go_out=go/ --go_opt=paths=source_relative --js_out=public/ efflux.proto
