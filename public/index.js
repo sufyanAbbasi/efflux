@@ -1,6 +1,7 @@
 import {html, render, nothing} from '//unpkg.com/lit-html@latest/lit-html.js';
 import '//unpkg.com/cytoscape@latest/dist/cytoscape.min.js';
 
+goog.require('proto.efflux.CellType');
 goog.require('proto.efflux.CytokineType');
 goog.require('proto.efflux.InteractionLoginRequest');
 goog.require('proto.efflux.InteractionLoginResponse');
@@ -8,6 +9,7 @@ goog.require('proto.efflux.InteractionRequest');
 goog.require('proto.efflux.InteractionResponse');
 goog.require('proto.efflux.Position');
 goog.require('proto.efflux.RenderableSocketData');
+goog.require('proto.efflux.RenderType');
 goog.require('proto.efflux.StatusSocketData');
 
 
@@ -427,38 +429,15 @@ class Render {
                 id,
                 visible,
                 position,
+                type,
             } = renderables[i];
             const {x, y, zIndex} = position;
             // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
             let el = document.querySelector(`#${id}`);
-            let z = id.startsWith('Nanobot') ? 2 : 0;
+            const z = getZIndex(type);
             if (!el) {
-                const color = getCellColor(id);
                 const container = document.createElement('div');
-                if (id.startsWith('Nanobot')) {
-                    render(html`
-                        <a-box
-                            id="${id}"
-                            class="cell disposable"
-                            width="${getSize(id)}"
-                            height="${getSize(id)}"
-                            depth="${getSize(id)}"
-                            color="${color}"
-                            position="${x} ${-y} ${z}">
-                        </a-box>
-                    `, container);
-                } else {
-                    render(html`
-                        <a-sphere
-                            id="${id}"
-                            class="cell disposable clickable"
-                            radius="${getSize(id)}"
-                            color="${color}"
-                            position="${x} ${-y} ${z}"
-                            clickhandler>
-                        </a-sphere>
-                    `, container);
-                }
+                renderAframe(id, type, x, y, z, container)
                 el = container.firstElementChild;
                 const planes = document.querySelectorAll('a-plane');
                 const plane = planes[zIndex] || planes[0];
@@ -708,8 +687,8 @@ class Interaction {
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.DROP_CYTOKINE);
-        const cytokinType = document.querySelector('select[name="cytokine-type"]')?.value ?? 0;
-        request.setCytokineType(cytokinType);
+        const cytokineType = document.querySelector('select[name="cytokine-type"]')?.value ?? 0;
+        request.setCytokineType(cytokineType);
         this.activeSocket?.send(request.serializeBinary());        
     }
 
@@ -772,71 +751,136 @@ class Interaction {
     }
 }
 
-function getCellColor(id) {
-    if (!id) {
-        return 'red';
+function renderAframe(id, type, x, y, z, container) {
+    const size = getSize(type);
+    const color = getColor(type);
+    if (type.nanobotType) {
+        render(html`
+            <a-box
+                id="${id}"
+                class="cell disposable"
+                width="${size}"
+                height="${size}"
+                depth="${size}"
+                color="${color}"
+                position="${x} ${-y} ${z}">
+            </a-box>
+        `, container);
+    } else if (type.cellType) {
+        render(html`
+            <a-sphere
+                id="${id}"
+                class="cell disposable clickable"
+                radius="${size}"
+                color="${color}"
+                position="${x} ${-y} ${z}"
+                clickhandler>
+            </a-sphere>
+        `, container);
+    } else if (type.cytokineType) {
+        render(html`
+            <a-ring
+                color="${color}"
+                radius-inner="${size}"
+                radius-outer="${size + 1}">
+            </a-ring>
+        `, container);
     }
-    const match = id.match(GET_CELL_TYPE_REGEX) || []
-    switch (match[1]) {
-        case 'Nanobot':
-            return "gray";
-        case 'Bacteria':
-            return 'yellowgreen';
-        case 'Bacteroidota':
-            return 'forestgreen';
-        case 'Lymphoblast':
-            return 'purple';
-        case 'Myeloblast':
-            return 'rebeccapurple';
-        case 'Monocyte':
-            return 'mediumpurple';
-        case 'Macrophagocyte':
-            return 'coral';
-        case 'Dendritic':
-            return 'navy';
-        case 'Neutrocyte':
-            return 'yellow';
-        case 'NaturalKillerCell':
-            return 'lime';
-        case 'VirginTLymphocyte':
-            return 'turquoise';
-        case 'HelperTLymphocyte':
-            return 'mediumseagreen';
-        case 'KillerTLymphocyte':
-            return 'seagreen';
-        case 'BLymphocyte':
-            return 'lightsalmon';
-        case 'EffectorBLymphocyte':
-            return 'salmon';
-        case 'RedBlood':
-        case 'Neuron':
-        case 'Cardiomyocyte':
-        case 'Pneumocyte':
-        case 'Myocyte':
-        case 'Keratinocyte':
-        case 'Enterocyte':
-        case 'Podocyte':
-        case 'Hemocytoblast':
-        default:
-            return 'red';
-        }
 }
 
-function getSize(id) {
-    if (!id) {
+function getZIndex(type) {
+    if (type.cellType) {
+        return 0;
+    } else if (type.cytokineType) {
+        return 1;
+    } else if (type.nanobotType) {
+        return 2;
+    } else {
+        return 0;
+    }
+}
+
+function getColor(type) {
+    if (type.cellType) {
+        switch (type.cellType) {
+            case proto.efflux.CellType.BACTERIA:
+                return 'yellowgreen';
+            case proto.efflux.CellType.BACTEROIDOTA:
+                return 'forestgreen';
+            case proto.efflux.CellType.LYMPHOBLAST:
+                return 'purple';
+            case proto.efflux.CellType.MYELOBLAST:
+                return 'rebeccapurple';
+            case proto.efflux.CellType.MONOCYTE:
+                return 'mediumpurple';
+            case proto.efflux.CellType.MACROPHAGOCYTE:
+                return 'coral';
+            case proto.efflux.CellType.DENDRITIC:
+                return 'navy';
+            case proto.efflux.CellType.NEUTROCYTE:
+                return 'yellow';
+            case proto.efflux.CellType.NATURALKILLERCELL:
+                return 'lime';
+            case proto.efflux.CellType.VIRGINTLYMPHOCYTE:
+                return 'turquoise';
+            case proto.efflux.CellType.HELPERTLYMPHOCYTE:
+                return 'mediumseagreen';
+            case proto.efflux.CellType.KILLERTLYMPHOCYTE:
+                return 'seagreen';
+            case proto.efflux.CellType.BLYMPHOCYTE:
+                return 'lightsalmon';
+            case proto.efflux.CellType.EFFECTORBLYMPHOCYTE:
+                return 'salmon';
+            case proto.efflux.CellType.REDBLOOD:
+            case proto.efflux.CellType.NEURON:
+            case proto.efflux.CellType.CARDIOMYOCYTE:
+            case proto.efflux.CellType.PNEUMOCYTE:
+            case proto.efflux.CellType.MYOCYTE:
+            case proto.efflux.CellType.KERATINOCYTE:
+            case proto.efflux.CellType.ENTEROCYTE:
+            case proto.efflux.CellType.PODOCYTE:
+            case proto.efflux.CellType.HEMOCYTOBLAST:
+            default:
+                return 'red';
+        }
+    } else if (type.cytokineType) {
+        switch (type.cytokineType) {
+            case proto.efflux.CytokineType.CELL_DAMAGE:
+                return 'red';
+            case proto.efflux.CytokineType.CELL_STRESSED:
+                return 'yellow';
+            case proto.efflux.CytokineType.ANTIGEN_PRESENT:
+                return 'orange';
+            case proto.efflux.CytokineType.INDUCE_CHEMOTAXIS:
+                return 'green';
+            case proto.efflux.CytokineType.CYTOTOXINS:
+                return 'purple';
+            default:
+                return 'white';
+        }
+    } else if (type.nanobotType) {
+        return "gray";
+    } else {
+        return "white";
+    }
+}
+
+function getSize(type) {
+    if (type.cellType) {
+        switch (type.cellType) {
+            case proto.efflux.CellType.BACTERIA:
+            case proto.efflux.CellType.BACTEROIDOTA:
+                return 0.5;
+            case proto.efflux.CellType.MACROPHAGOCYTE:
+                return 1.25;
+            default:
+                return 1;
+        }
+    } else if (type.nanobotType) {
+        return 1.25;
+    } else {
         return 1;
     }
-    const match = id.match(GET_CELL_TYPE_REGEX) || []
-    switch (match[1]) {
-        case 'Nanobot':
-            return 1.25;
-        case 'Bacteria':
-            return 0.5;
-        case 'Macrophagocyte':
-            return 1.25;
-        default:
-            return 1;
-        }
 }
 
 function garbageCollector() {

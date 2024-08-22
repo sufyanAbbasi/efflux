@@ -981,6 +981,11 @@ func CopyEukaryoticCell(base *EukaryoticCell) *EukaryoticCell {
 				targetY:       base.render.targetY,
 				targetZ:       base.render.targetZ,
 				lastPositions: positionTracker,
+				renderType: RenderType{
+					Type: &RenderType_CellType{
+						CellType: base.cellType,
+					},
+				},
 			},
 			transportPath: base.transportPath,
 			wantPath:      base.wantPath,
@@ -1409,6 +1414,11 @@ func CopyLeukocyteStemCell(base *LeukocyteStemCell) *LeukocyteStemCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1520,6 +1530,11 @@ func CopyNeutrophil(base *Neutrophil) *Neutrophil {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1633,6 +1648,11 @@ func CopyMacrophage(base *Macrophage) *Macrophage {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1700,6 +1720,11 @@ func CopyNaturalKiller(base *NaturalKiller) *NaturalKiller {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1791,6 +1816,11 @@ func CopyDendriticCell(base *DendriticCell) *DendriticCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1863,6 +1893,11 @@ func CopyVirginTCell(base *VirginTCell) *VirginTCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -1943,6 +1978,11 @@ func CopyHelperTCell(base *HelperTCell) *HelperTCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -2008,6 +2048,11 @@ func CopyKillerTCell(base *KillerTCell) *KillerTCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -2074,6 +2119,11 @@ func CopyBCell(base *BCell) *BCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -2137,6 +2187,11 @@ func CopyEffectorBCell(base *EffectorBCell) *EffectorBCell {
 					targetY:       base.render.targetY,
 					targetZ:       base.render.targetZ,
 					lastPositions: positionTracker,
+					renderType: RenderType{
+						Type: &RenderType_CellType{
+							CellType: base.cellType,
+						},
+					},
 				},
 				transportPath: base.transportPath,
 				wantPath:      base.wantPath,
@@ -2185,6 +2240,11 @@ func CopyProkaryoticCell(base *ProkaryoticCell) *ProkaryoticCell {
 				targetY:       base.render.targetY,
 				targetZ:       base.render.targetZ,
 				lastPositions: positionTracker,
+				renderType: RenderType{
+					Type: &RenderType_CellType{
+						CellType: base.cellType,
+					},
+				},
 			},
 			transportPath: base.transportPath,
 			wantPath:      base.wantPath,

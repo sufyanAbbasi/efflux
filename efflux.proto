@@ -4,30 +4,31 @@ package efflux;
 option go_package = "./main";
 
 enum CellType {
-    Bacteria = 0;               // A baseline prokaryotic cell.
-    Bacteroidota = 1;           // Bacteria that synthesize vitamins in the gut.
-    RedBlood = 2;       
-    Neuron = 3;     
-    Cardiomyocyte = 4;          // Heart Cell
-    Pneumocyte = 5;             // Pulmonary Cell
-    Myocyte = 6;                // Muscle Cell
-    Keratinocyte = 7;           // Skin Cell
-    Enterocyte = 8;             // Gut Lining Cell
-    Podocyte = 9;               // Kidney Cell
-    Hemocytoblast = 10;         // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
-    Lymphoblast = 11;           // Stem Cell, becomes NK, B cells, T cells
-    Myeloblast = 12;            // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but n
-    Monocyte = 13;              // Stem Cell, becomes Macrophages and Dendritic cells
-    Macrophagocyte = 14;        // Macrophage
-    Dendritic = 15;             // Dendritic Cells
-    Neutrocyte = 16;            // Neutrophils
-    NaturalKillerCell = 17;     // Natural Killer Cell
-    VirginTLymphocyte = 18;     // Virgin T Cell
-    HelperTLymphocyte = 19;     // Helper T Cell
-    KillerTLymphocyte = 20;     // Killer T Cell
-    BLymphocyte = 21;           // B Cell
-    EffectorBLymphocyte = 22;   // Plasma Cell
-    ViralLoadCarrier = 23;      // A dummy cell that carries a virus. Always make sure this is last.
+    CellTypeUnknown = 0;
+    Bacteria = 1;               // A baseline prokaryotic cell.
+    Bacteroidota = 2;           // Bacteria that synthesize vitamins in the gut.
+    RedBlood = 3;       
+    Neuron = 4;     
+    Cardiomyocyte = 5;          // Heart Cell
+    Pneumocyte = 6;             // Pulmonary Cell
+    Myocyte = 7;                // Muscle Cell
+    Keratinocyte = 8;           // Skin Cell
+    Enterocyte = 9;             // Gut Lining Cell
+    Podocyte = 10;               // Kidney Cell
+    Hemocytoblast = 11;         // Bone Marrow Stem Cell, spawns Lymphoblast, Monocyte, and Myeloblast
+    Lymphoblast = 12;           // Stem Cell, becomes NK, B cells, T cells
+    Myeloblast = 13;            // Stem Cell, becomes Neutrophil (also Macrophages and Dendritic cells but n
+    Monocyte = 14;              // Stem Cell, becomes Macrophages and Dendritic cells
+    Macrophagocyte = 15;        // Macrophage
+    Dendritic = 16;             // Dendritic Cells
+    Neutrocyte = 17;            // Neutrophils
+    NaturalKillerCell = 18;     // Natural Killer Cell
+    VirginTLymphocyte = 19;     // Virgin T Cell
+    HelperTLymphocyte = 20;     // Helper T Cell
+    KillerTLymphocyte = 21;     // Killer T Cell
+    BLymphocyte = 22;           // B Cell
+    EffectorBLymphocyte = 23;   // Plasma Cell
+    ViralLoadCarrier = 24;      // A dummy cell that carries a virus. Always make sure this is last.
 }
 
 enum WorkType {
@@ -124,10 +125,24 @@ message StatusSocketData {
 
 }
 
+enum NanobotType {
+    NanobotUnknown = 0;
+    Nanobot = 1;
+}
+
+message RenderType {
+    oneof type {
+        CellType cell_type = 4;
+        CytokineType cytokine_type = 5;
+        NanobotType nanobot_type = 6;
+    }
+}
+
 message RenderableSocketData {
     string id = 1;
 	bool visible = 2;
 	Position position = 3;
+    RenderType type = 4;
 }
 
 message Position  {

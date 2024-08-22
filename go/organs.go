@@ -410,6 +410,11 @@ func (n *Node) InteractionsLogin(ctx context.Context, w http.ResponseWriter, r *
 			targetZ:       0,
 			lastPositions: &ring.Ring{},
 			ignoreWalls:   true,
+			renderType: RenderType{
+				Type: &RenderType_NanobotType{
+					NanobotType: NanobotType_Nanobot,
+				},
+			},
 		},
 	})
 	nanobot := nanobot_.(*Nanobot)

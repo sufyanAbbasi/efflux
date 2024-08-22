@@ -33,6 +33,7 @@ type Renderable struct {
 	lastPositions             *ring.Ring
 	followId                  RenderID
 	ignoreWalls               bool
+	renderType                RenderType
 }
 
 func (r *Renderable) SetVisible(visible bool) {
@@ -614,6 +615,7 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) *RenderableSocketData 
 			Y: int32(r.position.Y),
 			Z: int32(m.level),
 		},
+		Type: &r.renderType,
 	}
 }
 
