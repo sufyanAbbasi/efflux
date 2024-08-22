@@ -6,7 +6,7 @@ install:
 	command -v cargo >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 install:
-	npm -i
+	npm i
 	# See https://github.com/tikv/grpc-rs
 	cargo install protobuf-codegen
 	cargo install grpcio-compiler
