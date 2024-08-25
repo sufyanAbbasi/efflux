@@ -18,7 +18,7 @@ const PendingCloseSockets = new WeakMap();
 const LastRenderTime = new Map();
 const RENDER_TIMEOUT = 3000; // 3s
 const PING_INTERVAL = 3000; // 3s
-const GET_CELL_TYPE_REGEX = new RegExp(/([a-z]+)[0-9]+$/i);
+const RENDER_MAX = 10
 let activeNode = null;
 
 const cy = cytoscape({
@@ -256,7 +256,8 @@ class Node {
 class Render {
     constructor(node) {
         this.node = node;
-        this.activeSocket = null;
+        this.activeCellSocket = null;
+        this.activeCytokineSocket = null;
         this.renderableDataBuffer = [];
     }
 
@@ -301,7 +302,9 @@ class Render {
         </details>`, container);
         document.querySelector('.panel').appendChild(container);
         document.querySelector('.render').classList.add('show');
-        await this.setupRenderSocket(this.node.address);
+        await this.setupRenderTexture(this.node.address);
+        await this.setupCellRenderSocket(this.node.address);
+        await this.setupCytokineRenderSocket(this.node.address);
     }
 
     async collapse() {
@@ -309,7 +312,7 @@ class Render {
         for (const el of document.querySelectorAll('.disposable')) {
             el.remove();
         }
-        await this.closeSocket();
+        await this.closeSockets();
         const renderContainer = document.querySelector('.render')
         renderContainer?.classList?.remove('show')
         const panel = document.querySelector('.panel');
@@ -318,9 +321,8 @@ class Render {
         }
     }
 
-    async setupRenderSocket(address) {
-        this.setupRenderTexture(address);
-        const socket = new WebSocket(getWebSocketAddress(address + '/render/stream'))
+    async setupCellRenderSocket(address) {
+        const socket = new WebSocket(getWebSocketAddress(address + '/render/stream/cells'))
         socket.binaryType = "arraybuffer";
         try {
             await new Promise((resolve, reject) => {
@@ -329,20 +331,50 @@ class Render {
                 };
                 socket.onerror = reject;
             });
-            console.log('Connected Render:', this.node.address);
-            this.activeSocket = socket;
+            console.log('Connected Cell Render:', this.node.address);
+            this.activeCellSocket = socket;
             socket.onmessage = (event) => {
                 this.getRenderData(event);
+                window.requestAnimationFrame(() => this.render());
             }
             const closePromise = new Promise((resolve) => {
                 socket.onclose = () => {
                     PendingCloseSockets.delete(socket);
-                    console.log('Closed Render:', this.node.address);
+                    console.log('Closed Cell Render:', this.node.address);
                     resolve();
                 };
             });
             PendingCloseSockets.set(socket, closePromise);
-            window.requestAnimationFrame(() => this.render());
+        } catch (err) {
+            console.error('Connection refused:', address, err);
+            socket.close();
+        }
+    }
+
+    async setupCytokineRenderSocket(address) {
+        const socket = new WebSocket(getWebSocketAddress(address + '/render/stream/cytokines'))
+        socket.binaryType = "arraybuffer";
+        try {
+            await new Promise((resolve, reject) => {
+                socket.onopen = () => {
+                    resolve(socket);
+                };
+                socket.onerror = reject;
+            });
+            console.log('Connected Cytokine Render:', this.node.address);
+            this.activeCytokineSocket = socket;
+            socket.onmessage = (event) => {
+                this.getRenderData(event);
+                window.requestAnimationFrame(() => this.render());
+            }
+            const closePromise = new Promise((resolve) => {
+                socket.onclose = () => {
+                    PendingCloseSockets.delete(socket);
+                    console.log('Closed Cytokine Render:', this.node.address);
+                    resolve();
+                };
+            });
+            PendingCloseSockets.set(socket, closePromise);
         } catch (err) {
             console.error('Connection refused:', address, err);
             socket.close();
@@ -414,23 +446,31 @@ class Render {
         });
     }
 
-    closeSocket() {
-        const toClose = this.activeSocket; 
-        this.activeSocket = null;
-        toClose?.close();
-        return PendingCloseSockets.get(toClose);
+    closeSockets() {
+        const toCellClose = this.activeCellSocket; 
+        this.activeCellSocket = null;
+        toCellClose?.close();
+        const toCytokineClose = this.activeCytokineSocket; 
+        this.activeCytokineSocket = null;
+        toCytokineClose?.close();
+        return Promise.all([
+            PendingCloseSockets.get(toCellClose),
+            PendingCloseSockets.get(toCytokineClose)
+        ]);
     }
 
     render() {
-        const renderables = this.renderableDataBuffer;
-        this.renderableDataBuffer = [];
-        for (let i = renderables.length -1; i >= 0; i--) {
+        for (let i = Math.min(this.renderableDataBuffer.length - 1, RENDER_MAX); i >= 0; i--) {
+            const renderable = this.renderableDataBuffer.pop()
+            if (!renderable) {
+                return
+            }
             const {
                 id,
                 visible,
                 position,
                 type,
-            } = renderables[i];
+            } = renderable;
             const {x, y, zIndex} = position;
             // e.g. <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
             let el = document.querySelector(`#${id}`);
@@ -439,6 +479,9 @@ class Render {
                 const container = document.createElement('div');
                 renderAframe(id, type, x, y, z, container)
                 el = container.firstElementChild;
+                if (!el) {
+                    return;
+                }
                 const planes = document.querySelectorAll('a-plane');
                 const plane = planes[zIndex] || planes[0];
                 if (!plane) {
@@ -456,9 +499,6 @@ class Render {
                 }
             }
             LastRenderTime.set(id, Date.now());
-        }
-        if (this.activeSocket) {
-            window.requestAnimationFrame(() => this.render());
         }
     }
 
@@ -481,7 +521,7 @@ class Render {
 class Interaction {
     constructor(node) {
         this.node = node;
-        this.activeSocket = null;
+        this.activeInteractionSocket = null;
         this.renderId = '';
         this.pingInterval = null;
         this.targetCellStatus = null;
@@ -519,7 +559,7 @@ class Interaction {
                 socket.onerror = reject;
             });
             console.log('Connected Interaction:', this.node.address);
-            this.activeSocket = socket;
+            this.activeInteractionSocket = socket;
             socket.onmessage = (event) => {
                 this.getInteractionData(event);
             }
@@ -543,9 +583,9 @@ class Interaction {
         }
     }
 
-    closeSocket() {
-        const toClose = this.activeSocket;
-        this.activeSocket = null;
+    closeSockets() {
+        const toClose = this.activeInteractionSocket;
+        this.activeInteractionSocket = null;
         toClose?.close();
         return PendingCloseSockets.get(toClose);
     }
@@ -556,8 +596,8 @@ class Interaction {
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.CLOSE);
-        this.activeSocket?.send(request.serializeBinary());
-        await this.closeSocket();
+        this.activeInteractionSocket?.send(request.serializeBinary());
+        await this.closeSockets();
     }
 
     async getInteractionData({data}) {
@@ -632,7 +672,7 @@ class Interaction {
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.PING);
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     goTo(vec3, el) {
@@ -644,7 +684,7 @@ class Interaction {
         position.setX(Math.round(vec3.x));
         position.setY(Math.round(-vec3.y));
         request.setPosition(position)
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     follow(vec3, el) {
@@ -653,7 +693,7 @@ class Interaction {
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.FOLLOW);
         request.setTargetCell(el.id);
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     info(vec3, el) {
@@ -662,7 +702,7 @@ class Interaction {
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.INFO);
         request.setTargetCell(el.id);
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     attach(vec3, el) {
@@ -671,7 +711,7 @@ class Interaction {
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.ATTACH);
         request.setTargetCell(el.id);
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     detach(vec3, el) {
@@ -679,7 +719,7 @@ class Interaction {
         const request = new proto.efflux.InteractionRequest();
         request.setSessionToken(sessionToken || '');
         request.setType(proto.efflux.InteractionType.DETACH);
-        this.activeSocket?.send(request.serializeBinary());
+        this.activeInteractionSocket?.send(request.serializeBinary());
     }
 
     dropCytokine() {
@@ -689,7 +729,7 @@ class Interaction {
         request.setType(proto.efflux.InteractionType.DROP_CYTOKINE);
         const cytokineType = document.querySelector('select[name="cytokine-type"]')?.value ?? 0;
         request.setCytokineType(cytokineType);
-        this.activeSocket?.send(request.serializeBinary());        
+        this.activeInteractionSocket?.send(request.serializeBinary());        
     }
 
     renderDefaultActions() {
@@ -714,7 +754,7 @@ class Interaction {
     }
 
     processClick(vec3, el) {
-        if (!this.activeSocket) {
+        if (!this.activeInteractionSocket) {
             return;
         }
         switch(el.tagName) {
@@ -780,9 +820,11 @@ function renderAframe(id, type, x, y, z, container) {
     } else if (type.cytokineType) {
         render(html`
             <a-ring
+                class="cytokine disposable"
                 color="${color}"
+                position="${x} ${-y} ${z}"
                 radius-inner="${size}"
-                radius-outer="${size + 1}">
+                radius-outer="${size + 0.2}">
             </a-ring>
         `, container);
     }

@@ -350,7 +350,8 @@ func (n *Node) Start(ctx context.Context) {
 	})
 	n.serverMux.HandleFunc(INTERACTIONS_STREAM_ENDPOINT, WebsocketHandler(ctx, n.InteractionStream))
 	if n.tissue != nil {
-		n.serverMux.HandleFunc(WORLD_RENDER_ENDPOINT, WebsocketHandler(ctx, n.tissue.Stream))
+		n.serverMux.HandleFunc(WORLD_CELLS_RENDER_ENDPOINT, WebsocketHandler(ctx, n.tissue.StreamCells))
+		n.serverMux.HandleFunc(WORLD_CYTOKINE_RENDER_ENDPOINT, WebsocketHandler(ctx, n.tissue.StreamCytokines))
 		n.serverMux.HandleFunc(WORLD_TEXTURE_ENDPOINT, n.tissue.RenderRootMatrix)
 	}
 

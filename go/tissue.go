@@ -67,15 +67,17 @@ func (p *InteractionPool) Delete(id RenderID) {
 }
 
 type Tissue struct {
-	bounds        image.Rectangle
-	streamingChan chan chan *RenderableSocketData
-	rootMatrix    *ExtracellularMatrix
+	bounds                image.Rectangle
+	cellStreamingChan     chan chan *RenderableSocketData
+	cytokineStreamingChan chan chan *RenderableSocketData
+	rootMatrix            *ExtracellularMatrix
 }
 
 func InitializeTissue(ctx context.Context) *Tissue {
 	tissue := &Tissue{
-		bounds:        image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
-		streamingChan: make(chan chan *RenderableSocketData, STREAMING_BUFFER_SIZE),
+		bounds:                image.Rect(-WORLD_BOUNDS/2, -WORLD_BOUNDS/2, WORLD_BOUNDS/2, WORLD_BOUNDS/2),
+		cellStreamingChan:     make(chan chan *RenderableSocketData, STREAMING_BUFFER_SIZE),
+		cytokineStreamingChan: make(chan chan *RenderableSocketData, STREAMING_BUFFER_SIZE),
 	}
 	tissue.BuildTissue()
 	return tissue
@@ -130,20 +132,22 @@ func (t *Tissue) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			t.Tick()
-		case r := <-t.streamingChan:
-			go t.rootMatrix.Render(r)
+		case r := <-t.cellStreamingChan:
+			go t.rootMatrix.StartRenderCells(r)
+		case r := <-t.cytokineStreamingChan:
+			go t.rootMatrix.StartRenderCytokines(r)
 		}
 	}
 }
 
-func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
-	fmt.Println("Render socket opened")
+func (t *Tissue) StreamCells(ctx context.Context, connection *Connection) {
+	fmt.Println("Cell render socket opened")
 	defer connection.Close()
 	go func(c *Connection) {
 		defer connection.Close()
 		for {
 			if _, _, err := c.NextReader(); err != nil {
-				fmt.Println("Render socket closed")
+				fmt.Println("Cell render socket closed")
 				return
 			}
 		}
@@ -155,7 +159,7 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 		select {
 		case <-ctx.Done():
 			return
-		case t.streamingChan <- r:
+		case t.cellStreamingChan <- r:
 			for renderable := range r {
 				out, err := proto.Marshal(renderable)
 				if err != nil {
@@ -166,7 +170,46 @@ func (t *Tissue) Stream(ctx context.Context, connection *Connection) {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 						fmt.Printf("error: %v %v", err, renderable)
 					} else {
-						fmt.Println("Render socket closed")
+						fmt.Println("Cell render socket closed")
+					}
+					return
+				}
+			}
+		}
+	}
+}
+
+func (t *Tissue) StreamCytokines(ctx context.Context, connection *Connection) {
+	fmt.Println("Cytokine render socket opened")
+	defer connection.Close()
+	go func(c *Connection) {
+		defer connection.Close()
+		for {
+			if _, _, err := c.NextReader(); err != nil {
+				fmt.Println("Cytokine render socket closed")
+				return
+			}
+		}
+	}(connection)
+	ticker := time.NewTicker(RENDER_STREAM_TICK_RATE)
+	for {
+		r := make(chan *RenderableSocketData, RENDER_BUFFER_SIZE)
+		<-ticker.C
+		select {
+		case <-ctx.Done():
+			return
+		case t.cytokineStreamingChan <- r:
+			for renderable := range r {
+				out, err := proto.Marshal(renderable)
+				if err != nil {
+					log.Fatalln("Failed to encode renderable:", err)
+				}
+				err = connection.WriteMessage(websocket.BinaryMessage, out)
+				if err != nil {
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+						fmt.Printf("error: %v %v", err, renderable)
+					} else {
+						fmt.Println("Cytokine render socket closed")
 					}
 					return
 				}
@@ -593,7 +636,7 @@ func (m *ExtracellularMatrix) Tick() {
 	}
 }
 
-func (m *ExtracellularMatrix) Render(renderChan chan *RenderableSocketData) {
+func (m *ExtracellularMatrix) StartRenderCells(renderChan chan *RenderableSocketData) {
 	m.RLock()
 	var attached []*Renderable
 	for _, a := range m.attached {
@@ -601,12 +644,19 @@ func (m *ExtracellularMatrix) Render(renderChan chan *RenderableSocketData) {
 	}
 	m.RUnlock()
 	for _, a := range attached {
-		renderChan <- m.RenderObject(a)
+		renderChan <- m.RenderCells(a)
 	}
 	close(renderChan)
 }
 
-func (m *ExtracellularMatrix) RenderObject(r *Renderable) *RenderableSocketData {
+func (m *ExtracellularMatrix) StartRenderCytokines(renderChan chan *RenderableSocketData) {
+	for _, r := range m.RenderCytokines() {
+		renderChan <- r
+	}
+	close(renderChan)
+}
+
+func (m *ExtracellularMatrix) RenderCells(r *Renderable) *RenderableSocketData {
 	return &RenderableSocketData{
 		Id:      string(r.id),
 		Visible: r.visible,
@@ -617,6 +667,35 @@ func (m *ExtracellularMatrix) RenderObject(r *Renderable) *RenderableSocketData 
 		},
 		Type: &r.renderType,
 	}
+}
+
+func (m *ExtracellularMatrix) RenderCytokines() (socketData []*RenderableSocketData) {
+	m.cytokinesMap.Range(func(pt any, cytokines any) bool {
+		var point = pt.(image.Point)
+		cytokines.(*sync.Map).Range(func(pt any, c any) bool {
+			var cytokine = c.(*Cytokine)
+			if cytokine.concentration > 0 {
+				var cytokineRender = &RenderableSocketData{
+					Id:      fmt.Sprintf("Cytokine%v-%v-%v", cytokine.cytokine, point.X, point.Y),
+					Visible: true,
+					Position: &Position{
+						X: int32(point.X),
+						Y: int32(point.Y),
+						Z: int32(m.level),
+					},
+					Type: &RenderType{
+						Type: &RenderType_CytokineType{
+							CytokineType: cytokine.cytokine,
+						},
+					},
+				}
+				socketData = append(socketData, cytokineRender)
+			}
+			return true
+		})
+		return true
+	})
+	return
 }
 
 func (m *ExtracellularMatrix) GetOpenSpaces(pts []image.Point) (open []image.Point) {
