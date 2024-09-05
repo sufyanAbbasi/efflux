@@ -256,6 +256,9 @@ class Node {
 class Render {
     constructor(node) {
         this.node = node;
+        this.device = null;
+        this.loadingBackgroundBitmap = null;
+        this.backgroundBitmapMap = new Map();
         this.activeCellSocket = null;
         this.activeCytokineSocket = null;
         this.renderableDataBuffer = [];
@@ -263,25 +266,128 @@ class Render {
 
     async renderScene() {
         await this.collapse();
+        if (!navigator.gpu) {
+            throw Error("WebGPU not supported.");
+        }
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw Error("Couldn't request WebGPU adapter.");
+        }
+    
+        this.device = await adapter.requestDevice();
         const renderContainer = document.querySelector('.render')
-        renderContainer.classList.add('show')
-        let scene = document.querySelector('.render a-scene');
+
+        let scene = document.querySelector('.render canvas');
         if (!scene) {
-            render(html`<a-scene
-                    embedded
-                    cursor="rayOrigin: mouse"
-                    raycaster="objects: .clickable">
-                <a-assets timeout="10000000">
-                    <img id="background" src="background.png">
-                </a-assets>
-                <a-sky color="white"></a-sky>
-                <a-camera
-                    id="camera"
-                    position="0 0 50">
-                </a-camera>
-            </a-scene>
+            render(html`
+            <canvas id="background"></canvas>
+            <canvas id="scene"></canvas>
             <div class="panel"></div>`, renderContainer);
         }
+        renderContainer.classList.add('show')
+        const shaders = `
+            struct VertexOut {
+            @builtin(position) position : vec4f,
+            @location(0) color : vec4f
+            }
+
+            @vertex
+            fn vertex_main(@location(0) position: vec4f,
+                        @location(1) color: vec4f) -> VertexOut
+            {
+            var output : VertexOut;
+            output.position = position;
+            output.color = color;
+            return output;
+            }
+
+            @fragment
+            fn fragment_main(fragData: VertexOut) -> @location(0) vec4f
+            {
+            return fragData.color;
+            }
+        `;
+        const shaderModule = this.device.createShaderModule({
+            code: shaders,
+          });
+
+        const canvas = document.querySelector("canvas#scene");
+        const context = canvas.getContext("webgpu");
+        
+        context.configure({
+            device: this.device,
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            alphaMode: "premultiplied",
+        });
+
+        const vertices = new Float32Array([
+            0.0, 0.6, 0, 1, 1, 0, 0, 1, -0.5, -0.6, 0, 1, 0, 1, 0, 1, 0.5, -0.6, 0, 1, 0,
+            0, 1, 1,
+        ]);
+        const vertexBuffer = this.device.createBuffer({
+            size: vertices.byteLength, // make it big enough to store vertices in
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        });
+        this.device.queue.writeBuffer(vertexBuffer, 0, vertices, 0, vertices.length);
+        const vertexBuffers = [
+            {
+                attributes: [
+                {
+                    shaderLocation: 0, // position
+                    offset: 0,
+                    format: "float32x4",
+                },
+                {
+                    shaderLocation: 1, // color
+                    offset: 16,
+                    format: "float32x4",
+                },
+                ],
+                arrayStride: 32,
+                stepMode: "vertex",
+            },
+        ];
+        const pipelineDescriptor = {
+            vertex: {
+              module: shaderModule,
+              entryPoint: "vertex_main",
+              buffers: vertexBuffers,
+            },
+            fragment: {
+              module: shaderModule,
+              entryPoint: "fragment_main",
+              targets: [
+                {
+                  format: navigator.gpu.getPreferredCanvasFormat(),
+                },
+              ],
+            },
+            primitive: {
+              topology: "triangle-list",
+            },
+            layout: "auto",
+          };
+        const renderPipeline = this.device.createRenderPipeline(pipelineDescriptor);
+        const commandEncoder = this.device.createCommandEncoder();
+        const clearColor = { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+
+        const renderPassDescriptor = {
+        colorAttachments: [
+            {
+            clearValue: clearColor,
+            loadOp: "clear",
+            storeOp: "store",
+            view: context.getCurrentTexture().createView(),
+            },
+        ],
+        };
+        const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+        passEncoder.setPipeline(renderPipeline);
+        passEncoder.setVertexBuffer(0, vertexBuffer);
+        passEncoder.draw(3);
+        passEncoder.end();
+        this.device.queue.submit([commandEncoder.finish()]);
+
         const container = document.createElement('div');
         render(html`<button class="close" @click="${() => {
             this.node.stop();
@@ -301,13 +407,37 @@ class Render {
             </div>
         </details>`, container);
         document.querySelector('.panel').appendChild(container);
-        document.querySelector('.render').classList.add('show');
         await this.setupRenderTexture(this.node.address);
-        await this.setupCellRenderSocket(this.node.address);
-        await this.setupCytokineRenderSocket(this.node.address);
+        // await this.setupCellRenderSocket(this.node.address);
+        // await this.setupCytokineRenderSocket(this.node.address);
+        document.querySelector('.render').classList.add('show');
+    }
+
+    async resetBackgroundLoading() {
+        const canvas = document.querySelector('canvas#background');
+        if (!canvas) {
+            // Probably not rendered yet.
+            return;
+        }
+        const context = canvas.getContext(
+            'bitmaprenderer'
+        )
+        try {
+            if (!this.loadingBackgroundBitmap) {
+                const background = await fetch(`/background.png`);
+                const backgroundBlob = await background.blob();
+                this.loadingBackgroundBitmap = await createImageBitmap(backgroundBlob, { colorSpaceConversion: 'none' });
+            }
+            // Need to create a copy bitmap since they can be detached.
+            const background2 = await createImageBitmap(this.loadingBackgroundBitmap);
+            context.transferFromImageBitmap(background2);
+        } catch(e) {
+            console.error('Unable to render background', e);
+        }
     }
 
     async collapse() {
+        await this.resetBackgroundLoading();
         // May be called multiple times.
         for (const el of document.querySelectorAll('.disposable')) {
             el.remove();
@@ -381,51 +511,19 @@ class Render {
         }
     }
 
-    setupRenderTexture(address) {
-        // Load texture from server.
-        const container = document.createElement('div');
-        render(html`
-            <a-plane
-                class="texture disposable clickable"
-                material="src:#background; repeat: 1 1;"
-                height="100"
-                width="100"
-                position="0 0 0"
-                rotation="0 0 0"
-                clickhandler>
-            </a-plane>
-        `, container);
-        const el = container.firstElementChild;
-        const scene = document.querySelector('a-scene');
-        if (!scene) {
-            return;
-        }
-        scene.appendChild(el);
-        return new Promise((resolve, reject) => {
-            const httpAddress = getHttpAddress(address);
-            const loader = new THREE.TextureLoader();
-            loader.load(`${httpAddress}/render/texture`, 
-                resolve,     // onLoadCallback
-                undefined,   // onProgress, deprecated.
-                reject       // onErrorCallback
-            );
-        })
-        .then((texture) => {
-            try {
-                const mesh = el.getObject3D('mesh');
-                if (mesh) {
-                    mesh.material.map = texture
-                }
-            } catch(e) {
-                // Pass.
-            }
-            // Get the remote image as a Blob with the fetch API
-            return fetch(texture.image.src);
-        })
-        .then((res) => res.blob())
-        .then((data) => {
-            return data.slice(data.size - 48, data.size - 16).text()
-        }).then((metadataJSON) => {
+    async setupRenderTexture(address) {
+        await this.resetBackgroundLoading();
+        const canvas = document.querySelector('canvas#background');
+        const context = canvas.getContext(
+            'bitmaprenderer'
+        )
+        // Load texture from server if not cached.
+        const httpAddress = getHttpAddress(address);
+        let bitmap = this.backgroundBitmapMap.get(httpAddress);
+        if (!bitmap) {
+            const res = await fetch(`${httpAddress}/render/texture`);
+            const blob = await res.blob();
+            let metadataJSON = await blob.slice(blob.size - 48, blob.size - 16).text()
             try {
                 metadataJSON = JSON.parse(metadataJSON);
             } catch(e) {
@@ -434,16 +532,18 @@ class Render {
             }
             let {id, z} = metadataJSON;
             z = parseInt(z);
-            // e.g. <a-plane material="src:#background; repeat: 1 1;"></a-plane>
-            const textureType = id.replace(/^([a-z]+)[0-9]+/gi, '$1').toLowerCase();
-            if (el && el.object3D) {
-                el.setAttribute('id', id);
-                el.classList.add(textureType);
-                if (el.object3D) {
-                    el.object3D.position.z = -30 * z;
-                }
+            console.log("Fetched texture: ", id, "at z =", z);
+            try {
+                bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
+                this.backgroundBitmapMap.set(httpAddress, bitmap);
+            } catch(e) {
+                console.error('Unable to create bitmap', e);
+                return
             }
-        });
+        }
+        // Create a copy since it can get detached.
+        const bitmap2 = await createImageBitmap(bitmap);
+        context.transferFromImageBitmap(bitmap2)
     }
 
     closeSockets() {

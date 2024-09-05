@@ -26,6 +26,12 @@ html, body {
     z-index: 2;
 }
 
+.render canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%; 
+}
+
 .render.show {
     display: block;
 }
